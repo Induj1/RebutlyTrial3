@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase } from '@/integrations/supabase/browserClient';
 
 interface UseVoiceInputOptions {
   onTranscript?: (text: string, isFinal: boolean) => void;

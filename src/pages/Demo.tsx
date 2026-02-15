@@ -25,7 +25,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase } from '@/integrations/supabase/browserClient';
 import { useVoiceInput } from '@/hooks/useVoiceInput';
 import { useAISpeech } from '@/hooks/useAISpeech';
 import { useAuth } from '@/hooks/useAuth';

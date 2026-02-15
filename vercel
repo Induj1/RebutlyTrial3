@@ -1,6 +1,0 @@
-{
-  "buildCommand": "nx build your-app-name --prod",
-  "outputDirectory": "dist/apps/your-app-name",
-  "rootDirectory": "apps/your-app-name",
-  "framework": null
-}
