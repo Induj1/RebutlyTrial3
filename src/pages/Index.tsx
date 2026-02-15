@@ -1,5 +1,5 @@
-import { useState } from 'react';
 import { Sidebar } from '@/components/Sidebar';
+import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar';
 import { HeroSection } from '@/components/HeroSection';
 import { StatsBar } from '@/components/StatsBar';
 import { QuickActions } from '@/components/QuickActions';
@@ -9,15 +9,10 @@ import { PricingSection } from '@/components/PricingSection';
 import { Footer } from '@/components/Footer';
 
 const Index = () => {
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-
   return (
-    <div className="flex min-h-screen">
-      {/* Sidebar */}
-      <Sidebar isOpen={sidebarOpen} onToggle={() => setSidebarOpen(!sidebarOpen)} />
-
-      {/* Main Content */}
-      <main className="flex-1 lg:ml-0 overflow-x-hidden">
+    <SidebarProvider defaultOpen>
+      <Sidebar />
+      <SidebarInset className="flex-1 lg:ml-0 overflow-x-hidden">
         {/* Hero */}
         <HeroSection />
 
@@ -41,8 +36,8 @@ const Index = () => {
 
         {/* Footer */}
         <Footer />
-      </main>
-    </div>
+      </SidebarInset>
+    </SidebarProvider>
   );
 };
 
