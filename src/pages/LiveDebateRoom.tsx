@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -23,7 +23,6 @@ import {
   Play,
   Users,
   Volume2,
-  VolumeX,
 } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/browserClient';
@@ -118,6 +117,14 @@ interface DebateFeedback {
   researchSuggestions: string[];
 }
 
+interface PhaseChangePayload {
+  userId?: string;
+  phase: DebatePhase;
+  timestamp?: number;
+  startedAt?: number;
+  duration?: number;
+}
+
 // ============================================================================
 // CONSTANTS
 // ============================================================================
@@ -184,10 +191,15 @@ const LiveDebateRoom = () => {
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const signalingChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const pendingIceCandidates = useRef<RTCIceCandidateInit[]>([]);
+  const lastStartedPhaseRef = useRef<string | null>(null);
   
   // Notes
   const [notes, setNotes] = useState<Note[]>([]);
   const [showNotesPanel, setShowNotesPanel] = useState(true);
+  const [notesActiveTab, setNotesActiveTab] = useState<'arguments' | 'rebuttals' | 'examples'>('arguments');
+  const [notesCurrentNote, setNotesCurrentNote] = useState('');
+  const [notesCurrentColor, setNotesCurrentColor] = useState<'default' | 'red' | 'yellow' | 'green' | 'blue'>('default');
+  const [notesCurrentTags, setNotesCurrentTags] = useState<string[]>([]);
   
   // Results
   const [feedback, setFeedback] = useState<DebateFeedback | null>(null);
@@ -222,6 +234,14 @@ const LiveDebateRoom = () => {
   const opponent = participants.find(p => p.user_id !== user?.id);
   const currentPlayer = participants.find(p => p.user_id === user?.id);
   const userRole = currentPlayer?.role || 'proposition';
+  const hostUserId = useMemo(() => {
+    const userIds = participants
+      .filter(p => p.user_id)
+      .map(p => p.user_id!)
+      .sort();
+    return userIds[0] ?? null;
+  }, [participants]);
+  const isHost = !!user?.id && user.id === hostUserId;
   
   const isUserProposition = 
     userRole === 'proposition' || 
@@ -289,12 +309,12 @@ const LiveDebateRoom = () => {
     });
   }, [id, user?.id, phase]);
 
-  const broadcastPhaseChange = useCallback((newPhase: DebatePhase) => {
+  const broadcastPhaseChange = useCallback((newPhase: DebatePhase, startedAt: number, duration: number) => {
     if (!id || !signalingChannelRef.current) return;
     signalingChannelRef.current.send({
       type: 'broadcast',
       event: 'phase_change',
-      payload: { userId: user?.id, phase: newPhase, timestamp: Date.now() },
+      payload: { userId: user?.id, phase: newPhase, timestamp: Date.now(), startedAt, duration },
     });
   }, [id, user?.id]);
 
@@ -306,6 +326,20 @@ const LiveDebateRoom = () => {
       payload: { userId: user?.id },
     });
   }, [id, user?.id]);
+
+  const setLocalVideoElement = useCallback((node: HTMLVideoElement | null) => {
+    localVideoRef.current = node;
+    if (node && localStream) {
+      node.srcObject = localStream;
+    }
+  }, [localStream]);
+
+  const setRemoteVideoElement = useCallback((node: HTMLVideoElement | null) => {
+    remoteVideoRef.current = node;
+    if (node && remoteStream) {
+      node.srcObject = remoteStream;
+    }
+  }, [remoteStream]);
 
   // ============================================================================
   // WEBRTC SETUP
@@ -332,6 +366,12 @@ const LiveDebateRoom = () => {
           { urls: 'stun:stun1.l.google.com:19302' },
         ],
       };
+      const turnUrl = import.meta.env.VITE_TURN_URL;
+      const turnUsername = import.meta.env.VITE_TURN_USERNAME;
+      const turnCredential = import.meta.env.VITE_TURN_CREDENTIAL;
+      if (turnUrl && turnUsername && turnCredential) {
+        config.iceServers?.push({ urls: turnUrl, username: turnUsername, credential: turnCredential });
+      }
 
       const pc = new RTCPeerConnection(config);
       peerConnection.current = pc;
@@ -340,11 +380,17 @@ const LiveDebateRoom = () => {
 
       pc.ontrack = (event) => {
         console.log('[LiveDebateRoom] Received remote track');
-        const [remoteMediaStream] = event.streams;
-        setRemoteStream(remoteMediaStream);
-        if (remoteVideoRef.current) {
-          remoteVideoRef.current.srcObject = remoteMediaStream;
-        }
+        const [incomingStream] = event.streams;
+        setRemoteStream(prev => {
+          const nextStream = incomingStream ?? prev ?? new MediaStream();
+          if (!incomingStream && !nextStream.getTracks().some(track => track.id === event.track.id)) {
+            nextStream.addTrack(event.track);
+          }
+          if (remoteVideoRef.current) {
+            remoteVideoRef.current.srcObject = nextStream;
+          }
+          return nextStream;
+        });
         setWebRTCConnected(true);
       };
 
@@ -437,10 +483,14 @@ const LiveDebateRoom = () => {
   const handleIceCandidate = useCallback(async (candidate: RTCIceCandidateInit, fromUserId: string) => {
     if (fromUserId === user?.id) return;
     
-    if (peerConnection.current?.remoteDescription) {
-      await peerConnection.current.addIceCandidate(new RTCIceCandidate(candidate));
-    } else {
-      pendingIceCandidates.current.push(candidate);
+    try {
+      if (peerConnection.current?.remoteDescription) {
+        await peerConnection.current.addIceCandidate(new RTCIceCandidate(candidate));
+      } else {
+        pendingIceCandidates.current.push(candidate);
+      }
+    } catch (err) {
+      console.error('[LiveDebateRoom] Error handling ICE candidate:', err);
     }
   }, [user?.id]);
 
@@ -448,11 +498,24 @@ const LiveDebateRoom = () => {
   // PHASE MANAGEMENT
   // ============================================================================
 
-  const startPhase = useCallback((newPhase: DebatePhase) => {
+  const startPhase = useCallback((
+    newPhase: DebatePhase,
+    options?: { startedAt?: number; duration?: number; broadcast?: boolean }
+  ) => {
+    const duration = options?.duration ?? getSpeechTime(newPhase);
+    const startedAt = options?.startedAt ?? Date.now();
+    const phaseKey = `${newPhase}:${startedAt}`;
+    if (lastStartedPhaseRef.current === phaseKey) {
+      return;
+    }
+    lastStartedPhaseRef.current = phaseKey;
+
+    const elapsedSeconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+    const remainingTime = Math.max(0, duration - elapsedSeconds);
+
     setPhase(newPhase);
-    const speechTime = getSpeechTime(newPhase);
-    setTimeLeft(speechTime);
-    setIsTimerRunning(true);
+    setTimeLeft(remainingTime);
+    setIsTimerRunning(remainingTime > 0);
     
     addTranscriptEntry('system', `${getSpeechLabel(newPhase)} begins`);
     
@@ -461,24 +524,29 @@ const LiveDebateRoom = () => {
       ? newPhase.startsWith('prop_') 
       : newPhase.startsWith('opp_');
     
-    if (isNextUserTurn && micEnabled && voiceSupported) {
+    if (isNextUserTurn && remainingTime > 0 && micEnabled && voiceSupported) {
       startRecording();
     }
     
-    broadcastPhaseChange(newPhase);
+    if (options?.broadcast !== false) {
+      broadcastPhaseChange(newPhase, startedAt, duration);
+    }
   }, [getSpeechTime, addTranscriptEntry, isUserProposition, micEnabled, voiceSupported, startRecording, broadcastPhaseChange]);
 
   const handleTransitionComplete = useCallback(() => {
     setShowTransition(false);
     if (nextPhaseAfterTransition) {
-      startPhase(nextPhaseAfterTransition);
+      if (isHost) {
+        startPhase(nextPhaseAfterTransition);
+      }
       setNextPhaseAfterTransition(null);
     }
-  }, [nextPhaseAfterTransition, startPhase]);
+  }, [nextPhaseAfterTransition, startPhase, isHost]);
 
   const handlePhaseEnd = useCallback(() => {
     if (isRecording) stopRecording();
     setIsTimerRunning(false);
+    if (!isHost) return;
     
     const nextPhase = getNextPhase(phase);
     
@@ -488,33 +556,27 @@ const LiveDebateRoom = () => {
     } else {
       setPhase('debate_complete');
       addTranscriptEntry('system', 'Debate complete!');
+      broadcastPhaseChange('debate_complete', Date.now(), 0);
       setShowPredictionModal(true);
     }
-  }, [phase, getNextPhase, isRecording, stopRecording, addTranscriptEntry]);
+  }, [phase, getNextPhase, isRecording, stopRecording, addTranscriptEntry, isHost, broadcastPhaseChange]);
 
   const handlePrepComplete = useCallback(() => {
+    if (!isHost) return;
     addTranscriptEntry('system', `Motion: "${topic}"`);
     addTranscriptEntry('system', `You are arguing ${isUserProposition ? 'FOR (Proposition)' : 'AGAINST (Opposition)'}`);
     setNextPhaseAfterTransition('prop_constructive');
     setShowTransition(true);
-  }, [topic, isUserProposition, addTranscriptEntry]);
+  }, [topic, isUserProposition, addTranscriptEntry, isHost]);
 
   const handleConnectAndStart = useCallback(async () => {
     const pc = await initializeWebRTC();
     if (pc) {
-      // Determine who creates the offer (lower user ID)
-      const userIds = participants
-        .filter(p => p.user_id)
-        .map(p => p.user_id!)
-        .sort();
-      
-      const shouldCreateOffer = userIds.length >= 2 && userIds[0] === user?.id;
-      
       broadcastReady();
       
       // Small delay to let the other peer set up
       setTimeout(() => {
-        if (shouldCreateOffer) {
+        if (isHost) {
           createOffer();
         }
       }, 1000);
@@ -522,7 +584,7 @@ const LiveDebateRoom = () => {
       // Move to prep phase
       setPhase('prep');
     }
-  }, [initializeWebRTC, participants, user?.id, broadcastReady, createOffer]);
+  }, [initializeWebRTC, broadcastReady, createOffer, isHost]);
 
   // ============================================================================
   // AI JUDGMENT
@@ -585,6 +647,19 @@ const LiveDebateRoom = () => {
   useEffect(() => {
     transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [transcript, currentSpeechText]);
+
+  // Attach streams even when video elements mount after tracks are already available
+  useEffect(() => {
+    if (localVideoRef.current && localStream && localVideoRef.current.srcObject !== localStream) {
+      localVideoRef.current.srcObject = localStream;
+    }
+  }, [localStream, phase]);
+
+  useEffect(() => {
+    if (remoteVideoRef.current && remoteStream && remoteVideoRef.current.srcObject !== remoteStream) {
+      remoteVideoRef.current.srcObject = remoteStream;
+    }
+  }, [remoteStream, phase]);
 
   // Timer
   useEffect(() => {
@@ -718,22 +793,33 @@ const LiveDebateRoom = () => {
         }
       })
       .on('broadcast', { event: 'user_ready' }, async ({ payload }) => {
-        if (payload.userId !== user.id && mediaReady) {
-          // Other user is ready, we might need to create offer
-          const userIds = participants
-            .filter(p => p.user_id)
-            .map(p => p.user_id!)
-            .sort();
-          
-          if (userIds.length >= 2 && userIds[0] === user.id) {
-            createOffer();
-          }
+        if (payload.userId !== user.id && mediaReady && isHost) {
+          createOffer();
         }
       })
       .on('broadcast', { event: 'phase_change' }, ({ payload }) => {
-        if (payload.userId !== user.id) {
-          // Sync phase from other user
-          console.log('[LiveDebateRoom] Phase sync from opponent:', payload.phase);
+        const phasePayload = payload as PhaseChangePayload;
+        if (
+          phasePayload.userId &&
+          phasePayload.userId !== user.id &&
+          phasePayload.userId === hostUserId
+        ) {
+          if (phasePayload.phase === 'debate_complete') {
+            setPhase('debate_complete');
+            setIsTimerRunning(false);
+            setShowTransition(false);
+            setNextPhaseAfterTransition(null);
+            setShowPredictionModal(true);
+            return;
+          }
+          if (!SPEECH_PHASES.includes(phasePayload.phase)) return;
+          startPhase(phasePayload.phase, {
+            startedAt: phasePayload.startedAt,
+            duration: phasePayload.duration,
+            broadcast: false,
+          });
+          setShowTransition(false);
+          setNextPhaseAfterTransition(null);
         }
       })
       .on(
@@ -776,7 +862,7 @@ const LiveDebateRoom = () => {
       supabase.removeChannel(channel);
       signalingChannelRef.current = null;
     };
-  }, [id, user, mediaReady, participants, phase, handleOffer, handleAnswer, handleIceCandidate, addTranscriptEntry, createOffer]);
+  }, [id, user, mediaReady, participants, phase, handleOffer, handleAnswer, handleIceCandidate, addTranscriptEntry, createOffer, hostUserId, isHost, startPhase]);
 
   // ============================================================================
   // RENDER HELPERS
@@ -880,17 +966,17 @@ const LiveDebateRoom = () => {
             <div className="space-y-3">
               <p className="text-xs text-muted-foreground">Transition alerts:</p>
               <div className="flex gap-2 justify-center">
-                {(['audio', 'visual', 'both'] as const).map(mode => (
+                {(['tick', 'auto', 'both'] as const).map(mode => (
                   <Button
                     key={mode}
                     variant={transitionMode === mode ? 'default' : 'outline'}
                     size="sm"
                     onClick={() => setTransitionMode(mode)}
                   >
-                    {mode === 'audio' && <Volume2 className="w-4 h-4 mr-1" />}
-                    {mode === 'visual' && <MessageSquare className="w-4 h-4 mr-1" />}
-                    {mode === 'both' && <>🔔</>}
-                    {mode.charAt(0).toUpperCase() + mode.slice(1)}
+                    {mode === 'auto' && <Volume2 className="w-4 h-4 mr-1" />}
+                    {mode === 'tick' && <MessageSquare className="w-4 h-4 mr-1" />}
+                    {mode === 'both' && <Play className="w-4 h-4 mr-1" />}
+                    {mode === 'tick' ? 'Confirm' : mode === 'auto' ? 'Auto' : 'Both'}
                   </Button>
                 ))}
               </div>
@@ -910,15 +996,13 @@ const LiveDebateRoom = () => {
 
       {/* Prep Phase */}
       {phase === 'prep' && (
-        <div className="flex-1 flex flex-col">
+        <div className="flex-1 flex items-center justify-center p-4">
           <PrepTimer
-            format={hvhFormat}
+            totalSeconds={FORMAT_TIMES[hvhFormat].prep}
             topic={topic}
             userSide={isUserProposition ? 'proposition' : 'opposition'}
             onComplete={handlePrepComplete}
             onSkip={handlePrepComplete}
-            notes={notes}
-            setNotes={setNotes}
           />
         </div>
       )}
@@ -933,7 +1017,7 @@ const LiveDebateRoom = () => {
               {/* Local video */}
               <div className="relative bg-muted rounded-lg overflow-hidden">
                 <video
-                  ref={localVideoRef}
+                  ref={setLocalVideoElement}
                   autoPlay
                   playsInline
                   muted
@@ -953,7 +1037,7 @@ const LiveDebateRoom = () => {
               <div className="relative bg-muted rounded-lg overflow-hidden">
                 {remoteStream ? (
                   <video
-                    ref={remoteVideoRef}
+                    ref={setRemoteVideoElement}
                     autoPlay
                     playsInline
                     className="w-full h-full object-cover"
@@ -1019,15 +1103,15 @@ const LiveDebateRoom = () => {
             <div className="w-80 border-l border-border overflow-hidden">
               <DebateNotes
                 notes={notes}
-                setNotes={setNotes}
-                activeTab="arguments"
-                setActiveTab={() => {}}
-                currentNote=""
-                setCurrentNote={() => {}}
-                currentColor="default"
-                setCurrentColor={() => {}}
-                currentTags={[]}
-                setCurrentTags={() => {}}
+                onNotesChange={setNotes}
+                activeTab={notesActiveTab}
+                onActiveTabChange={setNotesActiveTab}
+                currentNote={notesCurrentNote}
+                onCurrentNoteChange={setNotesCurrentNote}
+                currentColor={notesCurrentColor}
+                onCurrentColorChange={setNotesCurrentColor}
+                currentTags={notesCurrentTags}
+                onCurrentTagsChange={setNotesCurrentTags}
               />
             </div>
           )}
@@ -1037,10 +1121,9 @@ const LiveDebateRoom = () => {
       {/* Transition */}
       {showTransition && nextPhaseAfterTransition && (
         <TransitionCountdown
-          nextSpeaker={nextPhaseAfterTransition.startsWith('prop_') ? 'proposition' : 'opposition'}
-          nextSpeechType={nextPhaseAfterTransition.includes('constructive') ? 'constructive' : 
-                          nextPhaseAfterTransition.includes('rebuttal') ? 'rebuttal' : 'closing'}
-          isUserNext={isUserProposition ? nextPhaseAfterTransition.startsWith('prop_') : nextPhaseAfterTransition.startsWith('opp_')}
+          isVisible={showTransition}
+          nextSpeaker={isUserProposition ? (nextPhaseAfterTransition.startsWith('prop_') ? 'user' : 'opponent') : (nextPhaseAfterTransition.startsWith('opp_') ? 'user' : 'opponent')}
+          nextPhase={nextPhaseAfterTransition.includes('constructive') ? 'constructive' : nextPhaseAfterTransition.includes('rebuttal') ? 'rebuttal' : 'closing'}
           onComplete={handleTransitionComplete}
           mode={transitionMode}
         />

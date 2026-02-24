@@ -102,7 +102,9 @@ const PlayDebate = ({ topic, format: initialFormat, onExit }: PlayDebateProps) =
   const [feedback, setFeedback] = useState<DebateFeedback | null>(null);
   const [userArguments, setUserArguments] = useState<string[]>([]);
   const [aiArguments, setAiArguments] = useState<string[]>([]);
+  const messageListRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const shouldAutoScrollRef = useRef(true);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Enhanced state for debate flow
@@ -150,8 +152,16 @@ const PlayDebate = ({ topic, format: initialFormat, onExit }: PlayDebateProps) =
     }
   });
 
-  // Auto-scroll to bottom of messages
+  const handleMessageScroll = useCallback(() => {
+    const container = messageListRef.current;
+    if (!container) return;
+    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    shouldAutoScrollRef.current = distanceFromBottom < 80;
+  }, []);
+
+  // Auto-scroll to bottom of messages only when the user is already near the bottom
   useEffect(() => {
+    if (!shouldAutoScrollRef.current) return;
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, aiSpeech.displayedText]);
 
@@ -721,7 +731,11 @@ const PlayDebate = ({ topic, format: initialFormat, onExit }: PlayDebateProps) =
                   )}
                 </div>
 
-                <div className="glass-card p-4 h-[50vh] overflow-y-auto mb-4">
+                <div
+                  ref={messageListRef}
+                  onScroll={handleMessageScroll}
+                  className="glass-card p-4 h-[50vh] overflow-y-auto mb-4"
+                >
                   <div className="space-y-4">
                     {messages.map((msg) => (
                       <motion.div
