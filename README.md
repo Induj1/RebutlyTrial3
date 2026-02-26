@@ -72,3 +72,27 @@ To connect a domain, navigate to Project > Settings > Domains and click Connect 
 
 Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
 "# RebutlyTrial3" 
+
+## Production TURN (Twilio) setup
+
+This project now fetches ephemeral ICE/TURN credentials from the Supabase Edge Function `twilio-turn-token` for live debate WebRTC sessions.
+
+### 1) Set Supabase Edge Function secrets
+
+```bash
+supabase secrets set TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+supabase secrets set TWILIO_AUTH_TOKEN=your_twilio_auth_token
+supabase secrets set TWILIO_TURN_TTL_SECONDS=3600
+```
+
+### 2) Deploy the function
+
+```bash
+supabase functions deploy twilio-turn-token
+```
+
+### 3) Verify
+
+- Join a live debate with two users on different networks.
+- Confirm audio/video connects even behind stricter NAT/firewalls.
+- If Twilio token retrieval fails, the app falls back to public STUN servers.

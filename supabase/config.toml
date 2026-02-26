@@ -17,3 +17,6 @@ verify_jwt = false
 
 [functions.update-elo]
 verify_jwt = false
+
+[functions.twilio-turn-token]
+verify_jwt = true

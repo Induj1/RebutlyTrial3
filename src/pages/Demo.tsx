@@ -13,6 +13,7 @@ import {
   Download,
   Sparkles,
   Volume2,
+  VolumeX,
   RotateCcw,
   ArrowRight,
   Loader2,
@@ -24,6 +25,7 @@ import {
   BookOpen,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Slider } from '@/components/ui/slider';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/browserClient';
 import { useVoiceInput } from '@/hooks/useVoiceInput';
@@ -120,6 +122,8 @@ const Demo = () => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const shouldAutoScrollRef = useRef(true);
   const inputRef = useRef<HTMLInputElement>(null);
+  const userInputRef = useRef('');
+  const handlePhaseEndRef = useRef<() => void | Promise<void>>(() => {});
 
   // Enhanced state for debate flow
   const [userSide, setUserSide] = useState<'proposition' | 'opposition'>('proposition');
@@ -232,35 +236,43 @@ const Demo = () => {
     return config.rebuttalTime;
   }, [debateFormat, phase]);
 
-  // Auto-submit on timer expiry
-  const handleAutoSubmit = useCallback(() => {
-    if (userInput.trim()) {
-      const message = userInput.trim();
-      addMessage('user', message);
-      setUserArguments(prev => [...prev, message]);
-      setUserInput('');
-      toast.info('Time expired! Your argument was automatically submitted.');
-    }
+  useEffect(() => {
+    userInputRef.current = userInput;
   }, [userInput]);
+
+  // Auto-submit using a ref so typing does not reset timer behavior.
+  const autoSubmitCurrentInput = useCallback(() => {
+    const message = userInputRef.current.trim();
+    if (!message) return;
+
+    setMessages((prev) => [
+      ...prev,
+      { id: Date.now().toString(), sender: 'user', text: message, timestamp: new Date() },
+    ]);
+    setUserArguments(prev => [...prev, message]);
+    userInputRef.current = '';
+    setUserInput('');
+    toast.info('Time expired! Your argument was automatically submitted.');
+  }, []);
 
   // Timer logic with auto-submit
   useEffect(() => {
-    if (!isTimerRunning || timeLeft <= 0) return;
+    if (!isTimerRunning) return;
 
-    const timer = setInterval(() => {
+    const timer = window.setInterval(() => {
       setTimeLeft((prev) => {
         if (prev <= 1) {
           setIsTimerRunning(false);
-          handleAutoSubmit();
-          handlePhaseEnd();
+          autoSubmitCurrentInput();
+          void handlePhaseEndRef.current();
           return 0;
         }
         return prev - 1;
       });
     }, 1000);
 
-    return () => clearInterval(timer);
-  }, [isTimerRunning, timeLeft, handleAutoSubmit]);
+    return () => window.clearInterval(timer);
+  }, [isTimerRunning, autoSubmitCurrentInput]);
 
   const callDebateAI = useCallback(async (
     type: 'opponent_response' | 'generate_feedback',
@@ -529,6 +541,10 @@ const Demo = () => {
     }
   }, [phase, getNextPhase, isUserPhase, showTransitionScreen]);
 
+  useEffect(() => {
+    handlePhaseEndRef.current = handlePhaseEnd;
+  }, [handlePhaseEnd]);
+
   const addMessage = (sender: 'user' | 'ai' | 'system', text: string) => {
     setMessages((prev) => [
       ...prev,
@@ -750,6 +766,30 @@ const Demo = () => {
           </div>
 
           <div className="flex items-center gap-2">
+            {(phase === 'setup' || phase === 'prep' || isDebatePhase) && (
+              <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-muted">
+                {aiSpeech.isMuted || aiSpeech.volume === 0 ? (
+                  <VolumeX className="w-4 h-4 text-muted-foreground" />
+                ) : (
+                  <Volume2 className="w-4 h-4 text-muted-foreground" />
+                )}
+                <Slider
+                  value={[Math.round(aiSpeech.volume * 100)]}
+                  onValueChange={([v]) => {
+                    const normalizedVolume = v / 100;
+                    aiSpeech.setVolume(normalizedVolume);
+                    aiSpeech.setIsMuted(v === 0);
+                  }}
+                  max={100}
+                  min={0}
+                  step={5}
+                  className="w-24"
+                />
+                <span className="text-xs text-muted-foreground w-9 text-right">
+                  {Math.round(aiSpeech.volume * 100)}%
+                </span>
+              </div>
+            )}
             
             {/* User speaking timer */}
             {isCurrentlyUserSpeaking && (
