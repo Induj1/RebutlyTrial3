@@ -18,5 +18,5 @@ verify_jwt = false
 [functions.update-elo]
 verify_jwt = false
 
-[functions.twilio-turn-token]
+[functions.twilio-video-token]
 verify_jwt = true

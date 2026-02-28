@@ -28,6 +28,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/browserClient';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
+import { connect, type Room as TwilioRoom } from 'twilio-video';
 import logo from '@/assets/rebutly-logo.png';
 import { DebateNotes, type Note } from '@/components/DebateNotes';
 import { TransitionCountdown, type TransitionMode } from '@/components/TransitionCountdown';
@@ -186,18 +187,14 @@ const LiveDebateRoom = () => {
   const [signalingReady, setSignalingReady] = useState(false);
   const [webRTCConnected, setWebRTCConnected] = useState(false);
   
-  // WebRTC refs
-  const peerConnection = useRef<RTCPeerConnection | null>(null);
+  // Media refs
+  const twilioRoomRef = useRef<TwilioRoom | null>(null);
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const remoteAudioRef = useRef<HTMLAudioElement>(null);
   const signalingChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
-  const pendingIceCandidates = useRef<RTCIceCandidateInit[]>([]);
-  const pendingOfferRef = useRef<{ offer: RTCSessionDescriptionInit; fromUserId: string } | null>(null);
-  const pendingAnswerRef = useRef<{ answer: RTCSessionDescriptionInit; fromUserId: string } | null>(null);
   const lastStartedPhaseRef = useRef<string | null>(null);
   const phaseRef = useRef<DebatePhase>('loading');
-  const mediaReadyRef = useRef(false);
   const isHostRef = useRef(false);
   const hostUserIdRef = useRef<string | null>(null);
   
@@ -263,10 +260,6 @@ const LiveDebateRoom = () => {
   useEffect(() => {
     phaseRef.current = phase;
   }, [phase]);
-
-  useEffect(() => {
-    mediaReadyRef.current = mediaReady;
-  }, [mediaReady]);
 
   useEffect(() => {
     isHostRef.current = isHost;
@@ -375,200 +368,80 @@ const LiveDebateRoom = () => {
     }
   }, [remoteStream]);
 
-  const getIceServers = useCallback(async (): Promise<RTCIceServer[]> => {
-    const fallbackStun: RTCIceServer[] = [
-      { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:stun1.l.google.com:19302' },
-    ];
-
-    try {
-      const { data, error } = await supabase.functions.invoke('twilio-turn-token', {
-        body: { roomId: id },
-      });
-
-      if (error) {
-        console.error('[LiveDebateRoom] Failed to fetch Twilio ICE servers:', error);
-        return fallbackStun;
-      }
-
-      const iceServers = Array.isArray(data?.iceServers) ? data.iceServers as RTCIceServer[] : [];
-      if (!iceServers.length) {
-        console.warn('[LiveDebateRoom] Twilio ICE servers empty, using STUN fallback');
-        return fallbackStun;
-      }
-
-      return iceServers;
-    } catch (err) {
-      console.error('[LiveDebateRoom] ICE server request failed, using fallback:', err);
-      return fallbackStun;
-    }
-  }, [id]);
-
-  // ============================================================================
-  // WEBRTC SETUP
-  // ============================================================================
-
-  const initializeWebRTC = useCallback(async () => {
+  const initializeTwilioVideo = useCallback(async () => {
     if (!id || !user) return null;
-    
+
     try {
-      if (peerConnection.current) {
-        peerConnection.current.close();
-        peerConnection.current = null;
+      const existingRoom = twilioRoomRef.current;
+      if (existingRoom) {
+        existingRoom.disconnect();
+        twilioRoomRef.current = null;
       }
 
-      console.log('[LiveDebateRoom] Requesting media...');
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: true,
-        audio: { echoCancellation: true, noiseSuppression: true },
+      const roomName = `debate-room-${id}`;
+      const { data, error } = await supabase.functions.invoke('twilio-video-token', {
+        body: {
+          roomName,
+          identity: user.id,
+        },
       });
-      
-      setLocalStream(stream);
-      if (localVideoRef.current) {
-        localVideoRef.current.srcObject = stream;
+
+      if (error || !data?.token) {
+        console.error('[LiveDebateRoom] Failed to fetch Twilio video token:', error);
+        toast.error('Unable to initialize Twilio video. Please try again.');
+        return null;
       }
 
-      const iceServers = await getIceServers();
-      const config: RTCConfiguration = { iceServers };
+      const room = await connect(data.token, {
+        name: roomName,
+        audio: { echoCancellation: true, noiseSuppression: true },
+        video: true,
+      });
+      twilioRoomRef.current = room;
 
-      const pc = new RTCPeerConnection(config);
-      peerConnection.current = pc;
-      
-      stream.getTracks().forEach(track => pc.addTrack(track, stream));
-
-      pc.ontrack = (event) => {
-        console.log('[LiveDebateRoom] Received remote track');
-        const [incomingStream] = event.streams;
-        setRemoteStream(prev => {
-          const nextStream = incomingStream ?? prev ?? new MediaStream();
-          if (!incomingStream && !nextStream.getTracks().some(track => track.id === event.track.id)) {
-            nextStream.addTrack(event.track);
-          }
-          if (remoteVideoRef.current) {
-            remoteVideoRef.current.srcObject = nextStream;
-            remoteVideoRef.current.play().catch(() => {});
-          }
-          if (remoteAudioRef.current) {
-            remoteAudioRef.current.srcObject = nextStream;
-            remoteAudioRef.current.play().catch(() => {});
-          }
-          return nextStream;
-        });
-        setWebRTCConnected(true);
+      const syncLocalMedia = () => {
+        const tracks = Array.from(room.localParticipant.tracks.values())
+          .map(publication => publication.track?.mediaStreamTrack)
+          .filter((track): track is MediaStreamTrack => !!track);
+        const stream = tracks.length ? new MediaStream(tracks) : null;
+        setLocalStream(stream);
       };
 
-      pc.onicecandidate = (event) => {
-        if (event.candidate && signalingChannelRef.current) {
-          signalingChannelRef.current.send({
-            type: 'broadcast',
-            event: 'ice-candidate',
-            payload: { candidate: event.candidate.toJSON(), userId: user.id },
+      const syncRemoteMedia = () => {
+        const tracks: MediaStreamTrack[] = [];
+        room.participants.forEach(participant => {
+          participant.tracks.forEach(publication => {
+            const track = publication.track?.mediaStreamTrack;
+            if (track) tracks.push(track);
           });
-        }
+        });
+        setRemoteStream(tracks.length ? new MediaStream(tracks) : null);
+        setWebRTCConnected(tracks.length > 0);
       };
 
-      pc.onconnectionstatechange = () => {
-        console.log('[LiveDebateRoom] Connection state:', pc.connectionState);
-        setWebRTCConnected(pc.connectionState === 'connected' || pc.connectionState === 'completed');
-      };
+      room.on('participantConnected', syncRemoteMedia);
+      room.on('participantDisconnected', syncRemoteMedia);
+      room.on('trackSubscribed', syncRemoteMedia);
+      room.on('trackUnsubscribed', syncRemoteMedia);
+      room.on('trackPublished', syncRemoteMedia);
+      room.on('trackUnpublished', syncRemoteMedia);
+      room.on('disconnected', () => {
+        setRemoteStream(null);
+        setWebRTCConnected(false);
+      });
 
-      pc.oniceconnectionstatechange = () => {
-        console.log('[LiveDebateRoom] ICE state:', pc.iceConnectionState);
-        if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
-          setWebRTCConnected(true);
-        }
-      };
-
+      syncLocalMedia();
+      syncRemoteMedia();
       setMediaReady(true);
-      return pc;
+      return room;
     } catch (err: any) {
       console.error('[LiveDebateRoom] Media error:', err);
       toast.error(err.name === 'NotAllowedError' 
         ? 'Camera/microphone access denied' 
-        : 'Failed to access media devices');
+        : 'Failed to join Twilio room');
       return null;
     }
-  }, [id, user, getIceServers]);
-
-  const createOffer = useCallback(async () => {
-    if (!peerConnection.current || !signalingChannelRef.current) return;
-    
-    try {
-      if (peerConnection.current.signalingState !== 'stable') {
-        return;
-      }
-      const offer = await peerConnection.current.createOffer();
-      await peerConnection.current.setLocalDescription(offer);
-      
-      signalingChannelRef.current.send({
-        type: 'broadcast',
-        event: 'offer',
-        payload: { offer: { type: offer.type, sdp: offer.sdp }, userId: user?.id },
-      });
-      console.log('[LiveDebateRoom] Offer sent');
-    } catch (err) {
-      console.error('[LiveDebateRoom] Error creating offer:', err);
-    }
-  }, [user?.id]);
-
-  const handleOffer = useCallback(async (offer: RTCSessionDescriptionInit, fromUserId: string) => {
-    if (!peerConnection.current || fromUserId === user?.id) return;
-    
-    try {
-      if (peerConnection.current.signalingState !== 'stable') {
-        await peerConnection.current.setLocalDescription({ type: 'rollback' });
-      }
-      await peerConnection.current.setRemoteDescription(new RTCSessionDescription(offer));
-      
-      // Add any pending ICE candidates
-      for (const candidate of pendingIceCandidates.current) {
-        await peerConnection.current.addIceCandidate(new RTCIceCandidate(candidate));
-      }
-      pendingIceCandidates.current = [];
-      
-      const answer = await peerConnection.current.createAnswer();
-      await peerConnection.current.setLocalDescription(answer);
-      
-      signalingChannelRef.current?.send({
-        type: 'broadcast',
-        event: 'answer',
-        payload: { answer: { type: answer.type, sdp: answer.sdp }, userId: user?.id },
-      });
-      console.log('[LiveDebateRoom] Answer sent');
-    } catch (err) {
-      console.error('[LiveDebateRoom] Error handling offer:', err);
-    }
-  }, [user?.id]);
-
-  const handleAnswer = useCallback(async (answer: RTCSessionDescriptionInit, fromUserId: string) => {
-    if (!peerConnection.current || fromUserId === user?.id) return;
-    
-    try {
-      await peerConnection.current.setRemoteDescription(new RTCSessionDescription(answer));
-      
-      for (const candidate of pendingIceCandidates.current) {
-        await peerConnection.current.addIceCandidate(new RTCIceCandidate(candidate));
-      }
-      pendingIceCandidates.current = [];
-      console.log('[LiveDebateRoom] Remote description set');
-    } catch (err) {
-      console.error('[LiveDebateRoom] Error handling answer:', err);
-    }
-  }, [user?.id]);
-
-  const handleIceCandidate = useCallback(async (candidate: RTCIceCandidateInit, fromUserId: string) => {
-    if (fromUserId === user?.id) return;
-    
-    try {
-      if (peerConnection.current?.remoteDescription) {
-        await peerConnection.current.addIceCandidate(new RTCIceCandidate(candidate));
-      } else {
-        pendingIceCandidates.current.push(candidate);
-      }
-    } catch (err) {
-      console.error('[LiveDebateRoom] Error handling ICE candidate:', err);
-    }
-  }, [user?.id]);
+  }, [id, user]);
 
   // ============================================================================
   // PHASE MANAGEMENT
@@ -650,21 +523,13 @@ const LiveDebateRoom = () => {
       toast.error('Signaling channel is not ready yet. Please try again in a second.');
       return;
     }
-    const pc = await initializeWebRTC();
-    if (pc) {
+    const twilioRoom = await initializeTwilioVideo();
+    if (twilioRoom) {
       broadcastReady();
-      
-      // Small delay to let the other peer set up
-      setTimeout(() => {
-        if (isHost) {
-          createOffer();
-        }
-      }, 1000);
-      
       // Move to prep phase
       setPhase('prep');
     }
-  }, [initializeWebRTC, broadcastReady, createOffer, isHost, signalingReady]);
+  }, [initializeTwilioVideo, broadcastReady, signalingReady]);
 
   // ============================================================================
   // AI JUDGMENT
@@ -767,21 +632,6 @@ const LiveDebateRoom = () => {
     return () => clearInterval(timer);
   }, [isTimerRunning, handlePhaseEnd]);
 
-  // Flush any SDP that arrived before peer connection initialization
-  useEffect(() => {
-    if (!mediaReady || !peerConnection.current) return;
-    if (pendingOfferRef.current) {
-      const pending = pendingOfferRef.current;
-      pendingOfferRef.current = null;
-      handleOffer(pending.offer, pending.fromUserId);
-    }
-    if (pendingAnswerRef.current) {
-      const pending = pendingAnswerRef.current;
-      pendingAnswerRef.current = null;
-      handleAnswer(pending.answer, pending.fromUserId);
-    }
-  }, [mediaReady, handleOffer, handleAnswer]);
-
   // Fetch room data and set up realtime
   useEffect(() => {
     if (!id || !user) return;
@@ -872,7 +722,8 @@ const LiveDebateRoom = () => {
     // Cleanup
     return () => {
       localStream?.getTracks().forEach(track => track.stop());
-      peerConnection.current?.close();
+      twilioRoomRef.current?.disconnect();
+      twilioRoomRef.current = null;
       if (isRecording) stopRecording();
     };
   }, [id, user]);
@@ -882,33 +733,12 @@ const LiveDebateRoom = () => {
     if (!id || !user) return;
 
     const channel = supabase.channel(`room-${id}`)
-      .on('broadcast', { event: 'offer' }, ({ payload }) => {
-        if (!peerConnection.current) {
-          pendingOfferRef.current = { offer: payload.offer, fromUserId: payload.userId };
-          return;
-        }
-        handleOffer(payload.offer, payload.userId);
-      })
-      .on('broadcast', { event: 'answer' }, ({ payload }) => {
-        if (!peerConnection.current || !peerConnection.current.localDescription) {
-          pendingAnswerRef.current = { answer: payload.answer, fromUserId: payload.userId };
-          return;
-        }
-        handleAnswer(payload.answer, payload.userId);
-      })
-      .on('broadcast', { event: 'ice-candidate' }, ({ payload }) => {
-        handleIceCandidate(payload.candidate, payload.userId);
-      })
       .on('broadcast', { event: 'transcript' }, ({ payload }) => {
         if (payload.userId !== user.id) {
           addTranscriptEntry('opponent', payload.text, payload.phase);
         }
       })
-      .on('broadcast', { event: 'user_ready' }, async ({ payload }) => {
-        if (payload.userId !== user.id && mediaReadyRef.current && isHostRef.current) {
-          createOffer();
-        }
-      })
+      .on('broadcast', { event: 'user_ready' }, () => {})
       .on('broadcast', { event: 'phase_change' }, ({ payload }) => {
         const phasePayload = payload as PhaseChangePayload;
         if (
@@ -977,7 +807,7 @@ const LiveDebateRoom = () => {
       signalingChannelRef.current = null;
       setSignalingReady(false);
     };
-  }, [id, user, handleOffer, handleAnswer, handleIceCandidate, addTranscriptEntry, createOffer, startPhase]);
+  }, [id, user, addTranscriptEntry, startPhase]);
 
   // ============================================================================
   // RENDER HELPERS
