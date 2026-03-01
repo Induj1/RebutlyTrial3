@@ -96,3 +96,60 @@ supabase functions deploy twilio-video-token
 
 - Join a live debate with two users on different networks.
 - Confirm both users can see and hear each other in the debate room.
+
+## Supabase backend (project: uvjclnbkhpfryqpwjjmo)
+
+This repo is now configured for `https://uvjclnbkhpfryqpwjjmo.supabase.co`.
+
+### 1) Set frontend env
+
+Update `.env`:
+
+```bash
+VITE_SUPABASE_PROJECT_ID="uvjclnbkhpfryqpwjjmo"
+VITE_SUPABASE_URL="https://uvjclnbkhpfryqpwjjmo.supabase.co"
+VITE_SUPABASE_PUBLISHABLE_KEY="<new-project-publishable-anon-key>"
+```
+
+### 2) Link Supabase CLI to this project
+
+```bash
+supabase link --project-ref uvjclnbkhpfryqpwjjmo
+```
+
+### 3) Push database schema
+
+```bash
+supabase db push
+```
+
+### 4) Set required Edge Function secrets
+
+```bash
+# Required for Twilio video rooms
+supabase secrets set TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+supabase secrets set TWILIO_API_KEY_SID=SKxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+supabase secrets set TWILIO_API_KEY_SECRET=your_twilio_api_key_secret
+supabase secrets set TWILIO_VIDEO_TTL_SECONDS=3600
+
+# Optional (AI quality). If missing, function uses safe fallback output.
+supabase secrets set OPENAI_API_KEY=sk-...
+supabase secrets set OPENAI_MODEL=gpt-4.1-mini
+
+# Optional (voice synthesis). If missing, app falls back to browser speech/text mode.
+supabase secrets set ELEVENLABS_API_KEY=...
+supabase secrets set ELEVENLABS_MODEL_ID=eleven_multilingual_v2
+supabase secrets set ELEVENLABS_VOICE_ID_MALE=EXAVITQu4vr4xnSDxMaL
+supabase secrets set ELEVENLABS_VOICE_ID_FEMALE=21m00Tcm4TlvDq8ikWAM
+```
+
+### 5) Deploy functions
+
+```bash
+supabase functions deploy matchmaking-worker
+supabase functions deploy debate-ai
+supabase functions deploy elevenlabs-scribe-token
+supabase functions deploy elevenlabs-tts
+supabase functions deploy update-elo
+supabase functions deploy twilio-video-token
+```
