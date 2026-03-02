@@ -28,7 +28,6 @@ import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/browserClient';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
-import { connect, type Room as TwilioRoom } from 'twilio-video';
 import logo from '@/assets/rebutly-logo.png';
 import { DebateNotes, type Note } from '@/components/DebateNotes';
 import { TransitionCountdown, type TransitionMode } from '@/components/TransitionCountdown';
@@ -181,17 +180,8 @@ const LiveDebateRoom = () => {
   // Media state
   const [micEnabled, setMicEnabled] = useState(true);
   const [videoEnabled, setVideoEnabled] = useState(true);
-  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
-  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
-  const [mediaReady, setMediaReady] = useState(false);
+  const [videoConnected, setVideoConnected] = useState(false);
   const [signalingReady, setSignalingReady] = useState(false);
-  const [webRTCConnected, setWebRTCConnected] = useState(false);
-  
-  // Media refs
-  const twilioRoomRef = useRef<TwilioRoom | null>(null);
-  const localVideoRef = useRef<HTMLVideoElement>(null);
-  const remoteVideoRef = useRef<HTMLVideoElement>(null);
-  const remoteAudioRef = useRef<HTMLAudioElement>(null);
   const signalingChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const lastStartedPhaseRef = useRef<string | null>(null);
   const phaseRef = useRef<DebatePhase>('loading');
@@ -344,128 +334,12 @@ const LiveDebateRoom = () => {
     });
   }, [id, user?.id]);
 
-  const setLocalVideoElement = useCallback((node: HTMLVideoElement | null) => {
-    localVideoRef.current = node;
-    if (node && localStream) {
-      node.srcObject = localStream;
-      node.play().catch(() => {});
-    }
-  }, [localStream]);
-
-  const setRemoteVideoElement = useCallback((node: HTMLVideoElement | null) => {
-    remoteVideoRef.current = node;
-    if (node && remoteStream) {
-      node.srcObject = remoteStream;
-      node.play().catch(() => {});
-    }
-  }, [remoteStream]);
-
-  const setRemoteAudioElement = useCallback((node: HTMLAudioElement | null) => {
-    remoteAudioRef.current = node;
-    if (node && remoteStream) {
-      node.srcObject = remoteStream;
-      node.play().catch(() => {});
-    }
-  }, [remoteStream]);
-
-  const initializeTwilioVideo = useCallback(async () => {
-    if (!id || !user) return null;
-
-    try {
-      const existingRoom = twilioRoomRef.current;
-      if (existingRoom) {
-        existingRoom.disconnect();
-        twilioRoomRef.current = null;
-      }
-
-      const roomName = `debate-room-${id}`;
-
-      // Try Vercel API first, fallback to Supabase Edge Function
-      let token: string | null = null;
-
-      try {
-        const tokenRes = await fetch('/api/twilio-token', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ roomName, identity: user.id }),
-        });
-        const tokenData = await tokenRes.json();
-        if (tokenRes.ok && tokenData?.token) {
-          token = tokenData.token;
-        } else {
-          console.warn('[LiveDebateRoom] Vercel API token failed:', tokenRes.status, tokenData);
-        }
-      } catch (fetchErr) {
-        console.warn('[LiveDebateRoom] Vercel API fetch error:', fetchErr);
-      }
-
-      if (!token) {
-        const { data: fnData, error: fnError } = await supabase.functions.invoke('twilio-video-token', {
-          body: { roomName, identity: user.id },
-        });
-        if (!fnError && fnData?.token) {
-          token = fnData.token;
-        }
-      }
-
-      if (!token) {
-        console.error('[LiveDebateRoom] Both token sources failed');
-        toast.error(
-          'Unable to get video token. Set TWILIO_ACCOUNT_SID, TWILIO_API_KEY_SID, and TWILIO_API_KEY_SECRET in Vercel env vars, then redeploy.'
-        );
-        return null;
-      }
-
-      const room = await connect(token, {
-        name: roomName,
-        audio: { echoCancellation: true, noiseSuppression: true },
-        video: true,
-      });
-      twilioRoomRef.current = room;
-
-      const syncLocalMedia = () => {
-        const tracks = Array.from(room.localParticipant.tracks.values())
-          .map(publication => publication.track?.mediaStreamTrack)
-          .filter((track): track is MediaStreamTrack => !!track);
-        const stream = tracks.length ? new MediaStream(tracks) : null;
-        setLocalStream(stream);
-      };
-
-      const syncRemoteMedia = () => {
-        const tracks: MediaStreamTrack[] = [];
-        room.participants.forEach(participant => {
-          participant.tracks.forEach(publication => {
-            const track = publication.track?.mediaStreamTrack;
-            if (track) tracks.push(track);
-          });
-        });
-        setRemoteStream(tracks.length ? new MediaStream(tracks) : null);
-        setWebRTCConnected(tracks.length > 0);
-      };
-
-      room.on('participantConnected', syncRemoteMedia);
-      room.on('participantDisconnected', syncRemoteMedia);
-      room.on('trackSubscribed', syncRemoteMedia);
-      room.on('trackUnsubscribed', syncRemoteMedia);
-      room.on('trackPublished', syncRemoteMedia);
-      room.on('trackUnpublished', syncRemoteMedia);
-      room.on('disconnected', () => {
-        setRemoteStream(null);
-        setWebRTCConnected(false);
-      });
-
-      syncLocalMedia();
-      syncRemoteMedia();
-      setMediaReady(true);
-      return room;
-    } catch (err: any) {
-      console.error('[LiveDebateRoom] Media error:', err);
-      toast.error(err.name === 'NotAllowedError' 
-        ? 'Camera/microphone access denied' 
-        : 'Failed to join Twilio room');
-      return null;
-    }
-  }, [id, user]);
+  // Jitsi room URL - free, no API keys, no tokens, works everywhere
+  const jitsiRoomUrl = useMemo(() => {
+    if (!id) return '';
+    const roomName = `RebutlyDebate${id.replace(/-/g, '')}`;
+    return `https://meet.jit.si/${roomName}#config.startWithAudioMuted=false&config.startWithVideoMuted=false`;
+  }, [id]);
 
   // ============================================================================
   // PHASE MANAGEMENT
@@ -542,18 +416,11 @@ const LiveDebateRoom = () => {
     setShowTransition(true);
   }, [topic, isUserProposition, addTranscriptEntry, isHost]);
 
-  const handleConnectAndStart = useCallback(async () => {
-    if (!signalingReady) {
-      toast.error('Signaling channel is not ready yet. Please try again in a second.');
-      return;
-    }
-    const twilioRoom = await initializeTwilioVideo();
-    if (twilioRoom) {
-      broadcastReady();
-      // Move to prep phase
-      setPhase('prep');
-    }
-  }, [initializeTwilioVideo, broadcastReady, signalingReady]);
+  const handleConnectAndStart = useCallback(() => {
+    setVideoConnected(true);
+    broadcastReady();
+    setPhase('prep');
+  }, [broadcastReady]);
 
   // ============================================================================
   // AI JUDGMENT
@@ -633,28 +500,6 @@ const LiveDebateRoom = () => {
   useEffect(() => {
     transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [transcript, currentSpeechText]);
-
-  // Attach streams even when video elements mount after tracks are already available
-  useEffect(() => {
-    if (localVideoRef.current && localStream && localVideoRef.current.srcObject !== localStream) {
-      localVideoRef.current.srcObject = localStream;
-      localVideoRef.current.play().catch(() => {});
-    }
-  }, [localStream, phase]);
-
-  useEffect(() => {
-    if (remoteVideoRef.current && remoteStream && remoteVideoRef.current.srcObject !== remoteStream) {
-      remoteVideoRef.current.srcObject = remoteStream;
-      remoteVideoRef.current.play().catch(() => {});
-    }
-  }, [remoteStream, phase]);
-
-  useEffect(() => {
-    if (remoteAudioRef.current && remoteStream && remoteAudioRef.current.srcObject !== remoteStream) {
-      remoteAudioRef.current.srcObject = remoteStream;
-      remoteAudioRef.current.play().catch(() => {});
-    }
-  }, [remoteStream, phase]);
 
   // Timer
   useEffect(() => {
@@ -760,11 +605,7 @@ const LiveDebateRoom = () => {
 
     fetchRoom();
 
-    // Cleanup
     return () => {
-      localStream?.getTracks().forEach(track => track.stop());
-      twilioRoomRef.current?.disconnect();
-      twilioRoomRef.current = null;
       if (isRecording) stopRecording();
     };
   }, [id, user]);
@@ -853,14 +694,6 @@ const LiveDebateRoom = () => {
       if (phaseRef.current !== 'setup') setSignalingReady(false);
     };
   }, [id, user, addTranscriptEntry, startPhase]);
-
-  // Fallback: in setup phase, enable Connect button after 2s regardless of Realtime
-  // (Realtime WebSocket often fails due to CSP/network; don't block video on it)
-  useEffect(() => {
-    if (phase !== 'setup') return;
-    const t = setTimeout(() => setSignalingReady(true), 2000);
-    return () => clearTimeout(t);
-  }, [phase]);
 
   // ============================================================================
   // RENDER HELPERS
@@ -985,18 +818,27 @@ const LiveDebateRoom = () => {
               onClick={handleConnectAndStart}
               className="w-full mt-6 bg-gradient-to-r from-primary to-secondary"
               size="lg"
-              disabled={!signalingReady}
             >
               <Video className="w-5 h-5 mr-2" />
-              {signalingReady ? 'Connect & Start Debate' : 'Preparing connection...'}
+              Connect & Start Debate
             </Button>
           </div>
         </div>
       )}
 
-      {/* Prep Phase */}
+      {/* Prep Phase - show Jitsi + prep timer */}
       {phase === 'prep' && (
-        <div className="flex-1 flex items-center justify-center p-4">
+        <div className="flex-1 flex flex-col p-4 gap-4">
+          {videoConnected && jitsiRoomUrl && (
+            <div className="flex-1 min-h-[250px]">
+              <iframe
+                src={jitsiRoomUrl}
+                allow="camera; microphone; fullscreen; display-capture"
+                className="w-full h-full min-h-[220px] rounded-lg border border-border"
+                title="Video call"
+              />
+            </div>
+          )}
           <PrepTimer
             totalSeconds={FORMAT_TIMES[hvhFormat].prep}
             topic={topic}
@@ -1009,55 +851,19 @@ const LiveDebateRoom = () => {
 
       {/* Active Debate */}
       {SPEECH_PHASES.includes(phase) && (
-        <div className="flex-1 flex">
-          <audio ref={setRemoteAudioElement} autoPlay playsInline />
-          {/* Main content */}
-          <div className="flex-1 flex flex-col">
-            {/* Video feeds */}
-            <div className="flex-1 grid grid-cols-2 gap-2 p-2">
-              {/* Local video */}
-              <div className="relative bg-muted rounded-lg overflow-hidden">
-                <video
-                  ref={setLocalVideoElement}
-                  autoPlay
-                  playsInline
-                  muted
-                  className="w-full h-full object-cover"
+        <div className="flex-1 flex flex-col">
+          <div className="flex-1 flex flex-col min-h-0">
+            {/* Video - Jitsi Meet iframe (free, no API keys, no tokens) */}
+            {videoConnected && jitsiRoomUrl && (
+              <div className="flex-1 min-h-[300px] p-2">
+                <iframe
+                  src={jitsiRoomUrl}
+                  allow="camera; microphone; fullscreen; display-capture"
+                  className="w-full h-full min-h-[280px] rounded-lg border border-border"
+                  title="Video call"
                 />
-                <div className="absolute bottom-2 left-2 bg-black/60 px-2 py-1 rounded text-xs text-white">
-                  You ({isUserProposition ? 'Prop' : 'Opp'})
-                </div>
-                {isUserTurn && (
-                  <div className="absolute top-2 right-2 bg-green-500 px-2 py-1 rounded text-xs text-white font-bold animate-pulse">
-                    YOUR TURN
-                  </div>
-                )}
               </div>
-              
-              {/* Remote video */}
-              <div className="relative bg-muted rounded-lg overflow-hidden">
-                {remoteStream ? (
-                  <video
-                    ref={setRemoteVideoElement}
-                    autoPlay
-                    playsInline
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center">
-                    <User className="w-16 h-16 text-muted-foreground" />
-                  </div>
-                )}
-                <div className="absolute bottom-2 left-2 bg-black/60 px-2 py-1 rounded text-xs text-white">
-                  {opponent?.profile?.display_name || 'Opponent'} ({!isUserProposition ? 'Prop' : 'Opp'})
-                </div>
-                {!isUserTurn && (
-                  <div className="absolute top-2 right-2 bg-blue-500 px-2 py-1 rounded text-xs text-white font-bold animate-pulse">
-                    SPEAKING
-                  </div>
-                )}
-              </div>
-            </div>
+            )}
             
             {/* Current speech info */}
             <div className="px-4 py-2 bg-muted/50 text-center">
@@ -1099,28 +905,8 @@ const LiveDebateRoom = () => {
               </div>
             </div>
             
-            {/* Controls */}
+            {/* Controls - Jitsi has its own mic/video UI */}
             <div className="p-4 border-t border-border flex items-center justify-center gap-4">
-              <Button
-                variant={micEnabled ? 'default' : 'destructive'}
-                size="icon"
-                onClick={() => {
-                  setMicEnabled(!micEnabled);
-                  localStream?.getAudioTracks().forEach(t => t.enabled = !micEnabled);
-                }}
-              >
-                {micEnabled ? <Mic className="w-5 h-5" /> : <MicOff className="w-5 h-5" />}
-              </Button>
-              <Button
-                variant={videoEnabled ? 'default' : 'destructive'}
-                size="icon"
-                onClick={() => {
-                  setVideoEnabled(!videoEnabled);
-                  localStream?.getVideoTracks().forEach(t => t.enabled = !videoEnabled);
-                }}
-              >
-                {videoEnabled ? <Video className="w-5 h-5" /> : <VideoOff className="w-5 h-5" />}
-              </Button>
               <Button
                 variant="outline"
                 size="icon"
