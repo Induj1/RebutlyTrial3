@@ -227,7 +227,20 @@ const Play = () => {
         sendHeartbeat(entry.id);
       }, 5000);
 
-      // Subscribe to queue entry updates for match notification via Realtime
+      // Try matchmaking first (avoid opening Realtime if we get an immediate match)
+      const matchResult = await triggerMatchmaking(entry.id);
+      if (matchResult?.matchFound && matchResult?.roomId) {
+        if (searchTimerRef.current) clearInterval(searchTimerRef.current);
+        if (heartbeatRef.current) clearInterval(heartbeatRef.current);
+        setIsSearching(false);
+        setSearchTime(0);
+        setQueueEntryId(null);
+        toast.success('Match found!');
+        navigate(`/room/${matchResult.roomId}`);
+        return;
+      }
+
+      // Subscribe to queue updates via Realtime only when we need to wait
       channelRef.current = supabase
         .channel(`queue-${entry.id}`)
         .on(
@@ -240,14 +253,10 @@ const Play = () => {
           },
           (payload) => {
             const updated = payload.new as any;
-            console.log('Queue entry updated via realtime:', updated.status, updated.room_id);
-            
             if (updated.status === 'matched' && updated.room_id) {
-              // Cleanup
               if (searchTimerRef.current) clearInterval(searchTimerRef.current);
               if (heartbeatRef.current) clearInterval(heartbeatRef.current);
               if (channelRef.current) supabase.removeChannel(channelRef.current);
-              
               setIsSearching(false);
               setSearchTime(0);
               setQueueEntryId(null);
@@ -256,30 +265,7 @@ const Play = () => {
             }
           }
         )
-        .subscribe((status) => {
-          console.log('Realtime subscription status:', status);
-        });
-
-      // Trigger matchmaking via edge function, fallback to DB RPC when edge routes are unavailable
-      const matchResult = await triggerMatchmaking(entry.id);
-      console.log('Matchmaking result:', matchResult);
-
-      // If immediate match found by worker, handle it
-      if (matchResult?.matchFound && matchResult?.roomId) {
-        // Cleanup
-        if (searchTimerRef.current) clearInterval(searchTimerRef.current);
-        if (heartbeatRef.current) clearInterval(heartbeatRef.current);
-        if (channelRef.current) supabase.removeChannel(channelRef.current);
-        
-        setIsSearching(false);
-        setSearchTime(0);
-        setQueueEntryId(null);
-        toast.success('Match found!');
-        navigate(`/room/${matchResult.roomId}`);
-        return;
-      }
-
-      // Otherwise timer continues and fallback to AI after 30s
+        .subscribe();
 
     } catch (err) {
       console.error('Error joining queue:', err);

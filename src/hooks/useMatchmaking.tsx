@@ -231,10 +231,7 @@ export const useMatchmaking = (): UseMatchmakingReturn => {
         sendHeartbeat(entry.id);
       }, HEARTBEAT_INTERVAL);
 
-      // Subscribe to changes
-      subscribeToQueue(entry.id);
-
-      // Trigger matchmaking via edge function, fallback to DB RPC when edge routes are unavailable
+      // Try matchmaking first (avoid opening Realtime if we get an immediate match)
       const matchResult = await triggerMatchmaking(entry.id);
       if (matchResult?.matchFound && matchResult?.roomId) {
         cleanup();
@@ -243,6 +240,9 @@ export const useMatchmaking = (): UseMatchmakingReturn => {
         navigate(`/room/${matchResult.roomId}`);
         return;
       }
+
+      // Subscribe to changes only when we need to wait
+      subscribeToQueue(entry.id);
 
       // Set up AI fallback if enabled
       if (settings.opponentType === 'human_then_ai' || settings.opponentType === 'ai_only') {
