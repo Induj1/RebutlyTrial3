@@ -380,22 +380,43 @@ const LiveDebateRoom = () => {
 
       const roomName = `debate-room-${id}`;
 
-      // Use same-origin API route to avoid CORS (Supabase Edge Function has gateway CORS issues)
-      // For local dev: run `vercel dev` so /api/twilio-token is available
-      const tokenRes = await fetch('/api/twilio-token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ roomName, identity: user.id }),
-      });
+      // Try Vercel API first, fallback to Supabase Edge Function
+      let token: string | null = null;
 
-      const tokenData = await tokenRes.json();
-      if (!tokenRes.ok || !tokenData?.token) {
-        console.error('[LiveDebateRoom] Failed to fetch Twilio video token:', tokenData);
-        toast.error('Unable to initialize Twilio video. Please try again.');
+      try {
+        const tokenRes = await fetch('/api/twilio-token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ roomName, identity: user.id }),
+        });
+        const tokenData = await tokenRes.json();
+        if (tokenRes.ok && tokenData?.token) {
+          token = tokenData.token;
+        } else {
+          console.warn('[LiveDebateRoom] Vercel API token failed:', tokenRes.status, tokenData);
+        }
+      } catch (fetchErr) {
+        console.warn('[LiveDebateRoom] Vercel API fetch error:', fetchErr);
+      }
+
+      if (!token) {
+        const { data: fnData, error: fnError } = await supabase.functions.invoke('twilio-video-token', {
+          body: { roomName, identity: user.id },
+        });
+        if (!fnError && fnData?.token) {
+          token = fnData.token;
+        }
+      }
+
+      if (!token) {
+        console.error('[LiveDebateRoom] Both token sources failed');
+        toast.error(
+          'Unable to get video token. Set TWILIO_ACCOUNT_SID, TWILIO_API_KEY_SID, and TWILIO_API_KEY_SECRET in Vercel env vars, then redeploy.'
+        );
         return null;
       }
 
-      const room = await connect(tokenData.token, {
+      const room = await connect(token, {
         name: roomName,
         audio: { echoCancellation: true, noiseSuppression: true },
         video: true,
