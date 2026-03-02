@@ -84,18 +84,6 @@ const Play = () => {
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
   const triggerMatchmaking = useCallback(async (entryId: string) => {
-    try {
-      const { data: fnData, error: fnError } = await supabase.functions.invoke('matchmaking-worker', {
-        body: { entryId },
-      });
-
-      if (!fnError && fnData?.matchFound && fnData?.roomId) {
-        return fnData;
-      }
-    } catch (err) {
-      console.warn('[Matchmaking] Edge function unavailable, using RPC fallback:', err);
-    }
-
     const { data: rpcData, error: rpcError } = await supabase.rpc('attempt_matchmaking', {
       p_entry_id: entryId,
     });
