@@ -25,22 +25,27 @@ export default async function handler(req, res) {
   const apiKeySecret = process.env.TWILIO_API_KEY_SECRET;
 
   if (!accountSid || !apiKeySid || !apiKeySecret) {
-    const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+    const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || 'https://uvjclnbkhpfryqpwjjmo.supabase.co';
     const auth = req.headers.authorization;
-    if (supabaseUrl && auth) {
+    if (auth) {
       try {
         const fnRes = await fetch(`${supabaseUrl}/functions/v1/twilio-video-token`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: auth },
           body: JSON.stringify({ roomName, identity }),
         });
-        const data = await fnRes.json();
+        const data = await fnRes.json().catch(() => ({}));
         if (fnRes.ok && data.token) return res.status(200).json(data);
+        const msg = data?.error || `Supabase returned ${fnRes.status}`;
+        console.error('[twilio-token] Supabase proxy error:', fnRes.status, msg);
+        return res.status(500).json({ error: msg });
       } catch (e) {
         console.error('[twilio-token] Supabase proxy failed:', e);
+        return res.status(500).json({ error: `Proxy failed: ${e.message}` });
       }
     }
-    return res.status(500).json({ error: 'Twilio not configured. Add TWILIO_* to Vercel or configure Supabase.' });
+    console.error('[twilio-token] No Authorization header - user may not be logged in');
+    return res.status(401).json({ error: 'Not authenticated. Please sign in.' });
   }
 
   try {

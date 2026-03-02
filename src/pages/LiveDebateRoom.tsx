@@ -391,23 +391,22 @@ const LiveDebateRoom = () => {
       const tokenData = await tokenRes.json();
 
       if (!tokenRes.ok || !tokenData?.token) {
-        if (tokenRes.status === 404) {
-          const { data: fnData, error: fnError } = await supabase.functions.invoke('twilio-video-token', {
-            body: { roomName, identity: user.id },
+        const { data: fnData, error: fnError } = await supabase.functions.invoke('twilio-video-token', {
+          body: { roomName, identity: user.id },
+        });
+        if (!fnError && fnData?.token) {
+          const room = await connect(fnData.token, {
+            name: roomName,
+            audio: { echoCancellation: true, noiseSuppression: true },
+            video: true,
           });
-          if (!fnError && fnData?.token) {
-            const room = await connect(fnData.token, {
-              name: roomName,
-              audio: { echoCancellation: true, noiseSuppression: true },
-              video: true,
-            });
-            twilioRoomRef.current = room;
-            setupTwilioRoomHandlers(room);
-            return room;
-          }
+          twilioRoomRef.current = room;
+          setupTwilioRoomHandlers(room);
+          return room;
         }
-        console.error('[LiveDebateRoom] Token failed:', tokenRes.status, tokenData);
-        toast.error(tokenRes.status === 500 ? 'Twilio not configured. Add TWILIO_* env vars in Vercel.' : 'Unable to get video token.');
+        const errMsg = tokenData?.error || fnError?.message || 'Video token failed';
+        console.error('[LiveDebateRoom] Token failed:', tokenRes.status, tokenData, fnError);
+        toast.error(errMsg.includes('configured') ? 'Set Twilio secrets in Supabase: supabase secrets set TWILIO_ACCOUNT_SID TWILIO_API_KEY_SID TWILIO_API_KEY_SECRET' : errMsg);
         return null;
       }
 
