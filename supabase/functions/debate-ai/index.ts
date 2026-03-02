@@ -115,38 +115,37 @@ async function callOpenAI(req: DebateRequest) {
     ? `Topic: ${req.topic}\nUser side: ${req.userSide}\nUser arguments: ${JSON.stringify(req.userArguments ?? [])}\nOpponent arguments: ${JSON.stringify(req.aiArguments ?? [])}\nReturn JSON with fields: type='feedback', overallScore(0-100), verdict('win'|'loss'|'close'), summary, categories[{name,score,feedback,strengths,improvements}], keyMoments[{type,description,suggestion}], researchSuggestions[]`
     : `Topic: ${req.topic}\nYou are speaking as ${req.userSide === "proposition" ? "opposition" : "proposition"}.\nPhase: ${req.phase}\nUser arguments: ${JSON.stringify(req.userArguments ?? [])}\nConversation: ${JSON.stringify(req.conversationHistory ?? [])}\nReturn JSON: {"response":"..."}`;
 
-  const res = await fetch("https://api.openai.com/v1/responses", {
+  const model = Deno.env.get("OPENAI_MODEL") ?? "gpt-4o-mini";
+
+  const res = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: Deno.env.get("OPENAI_MODEL") ?? "gpt-4.1-mini",
-      input: [
+      model,
+      messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
-      text: {
-        format: {
-          type: "json_object",
-        },
-      },
+      response_format: { type: "json_object" },
+      temperature: 0.7,
     }),
   });
 
   if (!res.ok) {
     const errText = await res.text();
-    console.error("[debate-ai] OpenAI error", errText);
+    console.error("[debate-ai] OpenAI error", res.status, errText);
     return null;
   }
 
   const data = await res.json();
-  const outputText = data?.output_text;
-  if (!outputText || typeof outputText !== "string") return null;
+  const content = data?.choices?.[0]?.message?.content;
+  if (!content || typeof content !== "string") return null;
 
   try {
-    return JSON.parse(outputText);
+    return JSON.parse(content);
   } catch {
     return null;
   }

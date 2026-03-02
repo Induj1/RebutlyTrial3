@@ -518,9 +518,10 @@ const PlayDebate = ({ topic, format: initialFormat, onExit }: PlayDebateProps) =
     addMessage('user', message);
     setUserArguments(prev => [...prev, message]);
     setUserInput('');
+    toast.success('Argument submitted');
     
     if (!isTimerRunning) {
-      toast.info('Argument recorded! The timer has ended.');
+      toast.info('The timer has ended. Waiting for next phase...');
     }
   };
 

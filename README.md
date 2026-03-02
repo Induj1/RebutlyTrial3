@@ -132,9 +132,9 @@ supabase secrets set TWILIO_API_KEY_SID=SKxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 supabase secrets set TWILIO_API_KEY_SECRET=your_twilio_api_key_secret
 supabase secrets set TWILIO_VIDEO_TTL_SECONDS=3600
 
-# Optional (AI quality). If missing, function uses safe fallback output.
+# Required for AI debate - enables real OpenAI responses. Without it, generic fallbacks are used.
 supabase secrets set OPENAI_API_KEY=sk-...
-supabase secrets set OPENAI_MODEL=gpt-4.1-mini
+supabase secrets set OPENAI_MODEL=gpt-4o-mini
 
 # Optional (voice synthesis). If missing, app falls back to browser speech/text mode.
 supabase secrets set ELEVENLABS_API_KEY=...
