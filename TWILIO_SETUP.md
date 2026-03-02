@@ -4,13 +4,23 @@
 
 Video tokens are minted by a **Vercel Serverless Function** (`/api/twilio-token`) to avoid CORS issues with Supabase Edge Functions.
 
-**Add these env vars in Vercel** (Project Settings → Environment Variables):
+**Option A: Twilio in Vercel** (recommended)
+
+Add to Vercel → Project Settings → Environment Variables:
 
 ```
 TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 TWILIO_API_KEY_SID=SKxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 TWILIO_API_KEY_SECRET=<your-api-key-secret>
 ```
+
+**Option B: Proxy to Supabase** (if you don't want Twilio in Vercel)
+
+Add only:
+```
+SUPABASE_URL=https://uvjclnbkhpfryqpwjjmo.supabase.co
+```
+The API will proxy to Supabase's twilio-video-token (which must have TWILIO_* secrets set).
 
 **Local dev:** Run `vercel dev` (not `npm run dev`) so the API route is available.
 
