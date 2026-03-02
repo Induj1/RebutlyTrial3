@@ -826,18 +826,20 @@ const LiveDebateRoom = () => {
 
     signalingChannelRef.current = channel;
 
-    // Fallback: if Realtime doesn't connect in 8s, allow Connect button anyway so user can try video
-    const fallbackTimer = setTimeout(() => {
-      setSignalingReady(true);
-    }, 8000);
-
     return () => {
-      clearTimeout(fallbackTimer);
       supabase.removeChannel(channel);
       signalingChannelRef.current = null;
-      setSignalingReady(false);
+      if (phaseRef.current !== 'setup') setSignalingReady(false);
     };
   }, [id, user, addTranscriptEntry, startPhase]);
+
+  // Fallback: in setup phase, enable Connect button after 2s regardless of Realtime
+  // (Realtime WebSocket often fails due to CSP/network; don't block video on it)
+  useEffect(() => {
+    if (phase !== 'setup') return;
+    const t = setTimeout(() => setSignalingReady(true), 2000);
+    return () => clearTimeout(t);
+  }, [phase]);
 
   // ============================================================================
   // RENDER HELPERS
