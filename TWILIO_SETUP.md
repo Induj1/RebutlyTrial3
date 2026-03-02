@@ -1,3 +1,18 @@
+# Deployment & CORS Setup
+
+## Supabase CORS (Edge Functions)
+
+If you get CORS errors when calling Edge Functions from your frontend (e.g. on Vercel):
+
+1. Go to [Supabase Dashboard](https://supabase.com/dashboard/project/uvjclnbkhpfryqpwjjmo/settings/api)
+2. Open **Settings → API**
+3. Find the **CORS** or **Site URL / Allowed origins** section
+4. Add your production domain: `https://rebutly-trial34.vercel.app`
+5. Add `http://localhost:5173` for local dev
+6. Save
+
+---
+
 # Twilio Video Setup
 
 Twilio Programmable Video powers live debate sessions. The following secrets are configured in Supabase:
