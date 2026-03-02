@@ -54,6 +54,26 @@ export const useMatchmaking = (): UseMatchmakingReturn => {
   const aiFallbackRef = useRef<NodeJS.Timeout | null>(null);
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
+  const triggerMatchmaking = useCallback(async (entryId: string) => {
+    const { data: fnData, error: fnError } = await supabase.functions.invoke('matchmaking-worker', {
+      body: { entryId },
+    });
+
+    if (!fnError && fnData?.matchFound && fnData?.roomId) {
+      return fnData;
+    }
+
+    const { data: rpcData, error: rpcError } = await supabase.rpc('attempt_matchmaking', {
+      p_entry_id: entryId,
+    });
+
+    if (rpcError) {
+      throw rpcError;
+    }
+
+    return rpcData as { matchFound?: boolean; roomId?: string } | null;
+  }, []);
+
   // Cleanup function
   const cleanup = useCallback(() => {
     if (searchTimerRef.current) clearInterval(searchTimerRef.current);
@@ -222,10 +242,15 @@ export const useMatchmaking = (): UseMatchmakingReturn => {
       // Subscribe to changes
       subscribeToQueue(entry.id);
 
-      // Trigger matchmaking check via edge function
-      await supabase.functions.invoke('matchmaking-worker', {
-        body: { entryId: entry.id },
-      });
+      // Trigger matchmaking via edge function, fallback to DB RPC when edge routes are unavailable
+      const matchResult = await triggerMatchmaking(entry.id);
+      if (matchResult?.matchFound && matchResult?.roomId) {
+        cleanup();
+        setIsSearching(false);
+        toast.success('Match found!');
+        navigate(`/room/${matchResult.roomId}`);
+        return;
+      }
 
       // Set up AI fallback if enabled
       if (settings.opponentType === 'human_then_ai' || settings.opponentType === 'ai_only') {
@@ -250,7 +275,7 @@ export const useMatchmaking = (): UseMatchmakingReturn => {
       setIsSearching(false);
       cleanup();
     }
-  }, [user, profile, cleanup, sendHeartbeat, subscribeToQueue, createAIMatch]);
+  }, [user, profile, cleanup, sendHeartbeat, subscribeToQueue, createAIMatch, triggerMatchmaking, navigate]);
 
   // Cancel queue
   const cancelQueue = useCallback(async () => {

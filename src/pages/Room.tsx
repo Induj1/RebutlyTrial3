@@ -286,9 +286,19 @@ const Room = () => {
 
           // Trigger ELO update via edge function
           if (room?.mode === 'ranked' && !room?.is_ai_opponent) {
-            await supabase.functions.invoke('update-elo', {
+            const { error: eloFnError } = await supabase.functions.invoke('update-elo', {
               body: { roomId: id },
             });
+
+            // Fallback path when edge routes are unavailable
+            if (eloFnError) {
+              const { error: eloRpcError } = await supabase.rpc('process_elo_update', {
+                p_room_id: id,
+              });
+              if (eloRpcError) {
+                console.error('ELO fallback RPC failed:', eloRpcError);
+              }
+            }
           }
 
           navigate(`/room/${id}/results`);

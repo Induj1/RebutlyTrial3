@@ -83,6 +83,26 @@ const Play = () => {
   const heartbeatRef = useRef<NodeJS.Timeout | null>(null);
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
+  const triggerMatchmaking = useCallback(async (entryId: string) => {
+    const { data: fnData, error: fnError } = await supabase.functions.invoke('matchmaking-worker', {
+      body: { entryId },
+    });
+
+    if (!fnError && fnData?.matchFound && fnData?.roomId) {
+      return fnData;
+    }
+
+    const { data: rpcData, error: rpcError } = await supabase.rpc('attempt_matchmaking', {
+      p_entry_id: entryId,
+    });
+
+    if (rpcError) {
+      throw rpcError;
+    }
+
+    return rpcData as { matchFound?: boolean; roomId?: string } | null;
+  }, []);
+
   // Redirect to auth if not logged in
   useEffect(() => {
     if (!authLoading && !user) {
@@ -248,12 +268,9 @@ const Play = () => {
           console.log('Realtime subscription status:', status);
         });
 
-      // Trigger matchmaking worker
-      const { data: matchResult, error: matchError } = await supabase.functions.invoke('matchmaking-worker', {
-        body: { entryId: entry.id },
-      });
-
-      console.log('Matchmaking worker response:', matchResult, matchError);
+      // Trigger matchmaking via edge function, fallback to DB RPC when edge routes are unavailable
+      const matchResult = await triggerMatchmaking(entry.id);
+      console.log('Matchmaking result:', matchResult);
 
       // If immediate match found by worker, handle it
       if (matchResult?.matchFound && matchResult?.roomId) {
@@ -270,7 +287,7 @@ const Play = () => {
         return;
       }
 
-      // Otherwise the timer will continue and fallback to AI after 30s
+      // Otherwise timer continues and fallback to AI after 30s
 
     } catch (err) {
       console.error('Error joining queue:', err);
