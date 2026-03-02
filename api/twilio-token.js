@@ -7,11 +7,22 @@ import twilio from 'twilio';
  */
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'authorization, content-type');
 
   if (req.method === 'OPTIONS') return res.status(204).end();
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+
+  // GET = diagnostic (check if Twilio env vars are visible)
+  if (req.method === 'GET') {
+    const accountSid = process.env.TWILIO_ACCOUNT_SID;
+    const apiKeySid = process.env.TWILIO_API_KEY_SID;
+    const apiKeySecret = process.env.TWILIO_API_KEY_SECRET;
+    return res.status(200).json({
+      configured: !!(accountSid && apiKeySid && apiKeySecret),
+      env: { TWILIO_ACCOUNT_SID: !!accountSid, TWILIO_API_KEY_SID: !!apiKeySid, TWILIO_API_KEY_SECRET: !!apiKeySecret },
+      hint: !accountSid || !apiKeySid || !apiKeySecret ? 'Add vars in Vercel → Settings → Environment Variables, then redeploy.' : 'OK',
+    });
+  }
 
   const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {};
   const roomName = (body.roomName || '').trim();
