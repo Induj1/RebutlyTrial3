@@ -379,20 +379,23 @@ const LiveDebateRoom = () => {
       }
 
       const roomName = `debate-room-${id}`;
-      const { data, error } = await supabase.functions.invoke('twilio-video-token', {
-        body: {
-          roomName,
-          identity: user.id,
-        },
+
+      // Use same-origin API route to avoid CORS (Supabase Edge Function has gateway CORS issues)
+      // For local dev: run `vercel dev` so /api/twilio-token is available
+      const tokenRes = await fetch('/api/twilio-token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ roomName, identity: user.id }),
       });
 
-      if (error || !data?.token) {
-        console.error('[LiveDebateRoom] Failed to fetch Twilio video token:', error);
+      const tokenData = await tokenRes.json();
+      if (!tokenRes.ok || !tokenData?.token) {
+        console.error('[LiveDebateRoom] Failed to fetch Twilio video token:', tokenData);
         toast.error('Unable to initialize Twilio video. Please try again.');
         return null;
       }
 
-      const room = await connect(data.token, {
+      const room = await connect(tokenData.token, {
         name: roomName,
         audio: { echoCancellation: true, noiseSuppression: true },
         video: true,
@@ -815,11 +818,21 @@ const LiveDebateRoom = () => {
       )
       .subscribe((status) => {
         setSignalingReady(status === 'SUBSCRIBED');
+        // If Realtime fails (CLOSED), allow video connect after short delay (WebSocket can fail due to CSP/network)
+        if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
+          setTimeout(() => setSignalingReady(true), 2000);
+        }
       });
 
     signalingChannelRef.current = channel;
 
+    // Fallback: if Realtime doesn't connect in 8s, allow Connect button anyway so user can try video
+    const fallbackTimer = setTimeout(() => {
+      setSignalingReady(true);
+    }, 8000);
+
     return () => {
+      clearTimeout(fallbackTimer);
       supabase.removeChannel(channel);
       signalingChannelRef.current = null;
       setSignalingReady(false);

@@ -1,5 +1,21 @@
 # Deployment & CORS Setup
 
+## Twilio Video Token (Vercel API)
+
+Video tokens are minted by a **Vercel Serverless Function** (`/api/twilio-token`) to avoid CORS issues with Supabase Edge Functions.
+
+**Add these env vars in Vercel** (Project Settings → Environment Variables):
+
+```
+TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+TWILIO_API_KEY_SID=SKxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+TWILIO_API_KEY_SECRET=<your-api-key-secret>
+```
+
+**Local dev:** Run `vercel dev` (not `npm run dev`) so the API route is available.
+
+---
+
 ## Supabase CORS (Edge Functions)
 
 If you get CORS errors when calling Edge Functions from your frontend (e.g. on Vercel):
