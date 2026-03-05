@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/browserClient';
+import { invokeDebateAI } from '@/lib/debateAi';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { connect, type Room as TwilioRoom } from 'twilio-video';
@@ -554,21 +555,19 @@ const LiveDebateRoom = () => {
       const userArgs = transcript.filter(t => t.speaker === 'you').map(t => t.text);
       const oppArgs = transcript.filter(t => t.speaker === 'opponent').map(t => t.text);
       
-      const { data, error } = await supabase.functions.invoke('debate-ai', {
-        body: {
-          type: 'generate_feedback',
-          topic,
-          userSide: isUserProposition ? 'proposition' : 'opposition',
-          phase: 'closing',
-          userArguments: userArgs,
-          aiArguments: oppArgs,
-          conversationHistory: transcript
-            .filter(t => t.speaker !== 'system')
-            .map(t => ({
-              role: t.speaker === 'you' ? 'user' : 'assistant',
-              content: t.text,
-            })),
-        },
+      const { data, error } = await invokeDebateAI({
+        type: 'generate_feedback',
+        topic,
+        userSide: isUserProposition ? 'proposition' : 'opposition',
+        phase: 'closing',
+        userArguments: userArgs,
+        aiArguments: oppArgs,
+        conversationHistory: transcript
+          .filter(t => t.speaker !== 'system')
+          .map(t => ({
+            role: t.speaker === 'you' ? 'user' : 'assistant',
+            content: t.text,
+          })),
       });
       
       if (error) throw error;

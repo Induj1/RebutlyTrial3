@@ -291,21 +291,23 @@ export function useAISpeech(options: UseAISpeechOptions = {}): UseAISpeechReturn
     const durationMs = durationSeconds * 1000;
 
     try {
-      // Try to get TTS audio
+      // Try to get TTS audio (use proxy in dev to avoid CORS when Supabase origins can't be changed)
       console.log('[useAISpeech] Requesting TTS for', words.length, 'words, voice:', voiceGender);
-      
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/elevenlabs-tts`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-            Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-          },
-          body: JSON.stringify({ text: cleanedText, voiceGender }),
-        }
-      );
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
+      const ttsUrl =
+        import.meta.env.DEV && typeof window !== 'undefined' && supabaseUrl?.includes('supabase.co')
+          ? `${window.location.origin}/api/supabase-functions/functions/v1/elevenlabs-tts`
+          : `${supabaseUrl}/functions/v1/elevenlabs-tts`;
+
+      const response = await fetch(ttsUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string,
+          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+        },
+        body: JSON.stringify({ text: cleanedText, voiceGender }),
+      });
 
       const data = await response.json();
 

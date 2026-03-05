@@ -92,13 +92,32 @@ function createMockClient(): SupabaseClient<Database> {
   } as unknown as SupabaseClient<Database>;
 }
 
+// In dev, proxy Edge Function calls through Vite to avoid CORS (when Supabase Allowed Origins can't be changed)
+function getFetch(): typeof fetch | undefined {
+  if (import.meta.env.DEV && typeof window !== "undefined" && url?.includes("supabase.co")) {
+    const supabaseOrigin = new URL(url).origin;
+    return (input: RequestInfo | URL, init?: RequestInit) => {
+      const reqUrl = typeof input === "string" ? input : input instanceof Request ? input.url : input.toString();
+      if (reqUrl.startsWith(supabaseOrigin + "/functions/v1/")) {
+        const path = reqUrl.slice(supabaseOrigin.length); // /functions/v1/debate-ai
+        const proxyUrl = `${window.location.origin}/api/supabase-functions${path}`;
+        return fetch(proxyUrl, init);
+      }
+      return fetch(input, init);
+    };
+  }
+  return undefined;
+}
+
 export const supabase: SupabaseClient<Database> = (() => {
   if (!url || !ENV_KEY) {
     console.warn("Supabase not configured - running in offline mode");
     return createMockClient();
   }
 
+  const fetchOption = getFetch();
   return createClient<Database>(url, ENV_KEY, {
+    global: fetchOption ? { fetch: fetchOption } : undefined,
     auth: {
       storage: localStorage,
       persistSession: true,

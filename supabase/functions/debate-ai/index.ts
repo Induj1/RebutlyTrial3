@@ -13,7 +13,35 @@ type DebateRequest = {
   userArguments?: string[];
   aiArguments?: string[];
   conversationHistory?: Array<{ role: string; content: string }>;
+  speechDurationSeconds?: number;
 };
+
+const DEBATE_SYSTEM_PROMPT = `You are an expert competitive debater with extensive knowledge in philosophy, politics, economics, technology, and social sciences. You argue logically, cite real research and studies when relevant, and adapt your arguments to directly counter your opponent's points.
+
+Guidelines:
+- Make specific, substantive arguments backed by evidence or logical reasoning
+- Reference real studies, statistics, historical examples, or philosophical frameworks
+- Directly address and rebut your opponent's specific claims
+- Maintain a respectful but assertive debating tone
+- Keep responses focused and impactful (2-4 paragraphs max)
+- Use structured argumentation: claim, warrant, impact
+- Acknowledge strong opponent points while providing counterarguments`;
+
+const FEEDBACK_SYSTEM_PROMPT = `You are an expert debate coach and judge with experience in competitive debate formats (BP, AP, LD, PF, WSDC). Analyze debate performances with specific, actionable feedback based on argumentation quality, evidence use, rebuttal effectiveness, and delivery.
+
+Your feedback must be:
+- Specific: Reference exact arguments or phrases from the debate
+- Research-backed: Mention debate theory concepts and proven techniques
+- Actionable: Provide concrete steps for improvement
+- Balanced: Acknowledge strengths before areas for growth
+- Structured: Use clear categories with scores and explanations
+
+Scoring rubric (0-100):
+- Argumentation (logic, structure, depth of analysis)
+- Evidence (use of facts, examples, expert sources)
+- Rebuttal (direct engagement with opponent, refutation quality)
+- Delivery (clarity, persuasiveness, word economy)
+- Strategy (time management, prioritization, narrative)`;
 
 const app = new Hono();
 
@@ -106,17 +134,120 @@ async function callOpenAI(req: DebateRequest) {
   const apiKey = Deno.env.get("OPENAI_API_KEY");
   if (!apiKey) return null;
 
-  const isFeedback = req.type === "generate_feedback";
-  const systemPrompt = isFeedback
-    ? "You are an expert debate judge. Return strict JSON for the required feedback schema."
-    : "You are a competitive debate opponent. Return concise, substantive responses.";
+  const topic = req.topic ?? "";
+  const userSide = req.userSide ?? "proposition";
+  const phase = req.phase ?? "opening";
+  const userArguments = req.userArguments ?? [];
+  const aiArguments = req.aiArguments ?? [];
+  const conversationHistory = req.conversationHistory ?? [];
 
-  const userPrompt = isFeedback
-    ? `Topic: ${req.topic}\nUser side: ${req.userSide}\nUser arguments: ${JSON.stringify(req.userArguments ?? [])}\nOpponent arguments: ${JSON.stringify(req.aiArguments ?? [])}\nReturn JSON with fields: type='feedback', overallScore(0-100), verdict('win'|'loss'|'close'), summary, categories[{name,score,feedback,strengths,improvements}], keyMoments[{type,description,suggestion}], researchSuggestions[]`
-    : `Topic: ${req.topic}\nYou are speaking as ${req.userSide === "proposition" ? "opposition" : "proposition"}.\nPhase: ${req.phase}\nUser arguments: ${JSON.stringify(req.userArguments ?? [])}\nConversation: ${JSON.stringify(req.conversationHistory ?? [])}\nReturn JSON: {"response":"..."}`;
+  if (req.type === "generate_feedback") {
+    const systemPrompt = FEEDBACK_SYSTEM_PROMPT;
+    const debateTranscript = conversationHistory
+      .map(
+        (msg) =>
+          `[${msg.role === "user" ? "Debater" : "AI Opponent"}]: ${msg.content}`,
+      )
+      .join("\n\n");
+    const userPrompt = `Analyze this debate performance and provide structured feedback.
+
+Motion: "${topic}"
+User's side: ${userSide}
+
+Debate transcript:
+${debateTranscript || "(no transcript)"}
+
+User's arguments:
+${userArguments.map((a, i) => `${i + 1}. ${a}`).join("\n") || "None."}
+
+AI opponent's arguments:
+${aiArguments.map((a, i) => `${i + 1}. ${a}`).join("\n") || "None."}
+
+Respond with a single JSON object (no other text) with these exact keys:
+- type: "feedback"
+- overallScore: number 0-100
+- verdict: "win" | "loss" | "close"
+- summary: string (2-3 sentences)
+- categories: array of { name: "Argumentation"|"Evidence"|"Rebuttal"|"Delivery"|"Strategy", score: number, feedback: string, strengths: string[], improvements: string[] }
+- keyMoments: array of { type: "strength"|"missed_opportunity"|"effective_rebuttal"|"weak_argument", description: string, suggestion: string }
+- researchSuggestions: string[]`;
+
+    const model = Deno.env.get("OPENAI_MODEL") ?? "gpt-4o-mini";
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        response_format: { type: "json_object" },
+        temperature: 0.5,
+        max_tokens: 1500,
+      }),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      console.error("[debate-ai] OpenAI error", res.status, errText);
+      return null;
+    }
+
+    const data = await res.json();
+    const content = data?.choices?.[0]?.message?.content;
+    if (!content || typeof content !== "string") return null;
+    try {
+      const parsed = JSON.parse(content);
+      if (parsed && typeof parsed.overallScore === "number") {
+        return { type: "feedback", ...parsed };
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  // opponent_response
+  const WORDS_PER_MINUTE = 160;
+  const maxWords = req.speechDurationSeconds
+    ? Math.floor((req.speechDurationSeconds / 60) * WORDS_PER_MINUTE)
+    : 400;
+  const aiSide =
+    userSide === "proposition" ? "opposition" : "proposition";
+
+  const systemPrompt = `${DEBATE_SYSTEM_PROMPT}
+
+CRITICAL: Your response must be EXACTLY ${maxWords} words or fewer. Count your words carefully. This is a timed debate speech and you must finish within the allocated time.
+
+You are arguing the ${aiSide} side of this debate.
+Motion: "${topic}"
+
+Your opponent (${userSide}) has made the following arguments so far:
+${
+  userArguments.length > 0
+    ? userArguments.map((a, i) => `${i + 1}. ${a}`).join("\n")
+    : "No arguments yet."
+}
+
+Your previous arguments:
+${
+  aiArguments.length > 0
+    ? aiArguments.map((a, i) => `${i + 1}. ${a}`).join("\n")
+    : "None yet."
+}`;
+
+  const phaseInstructions: Record<string, string> = {
+    opening: `Deliver your opening statement. Present 2-3 strong arguments for your side (${aiSide}). Set up the framework for the debate and establish your key themes. Reply with a JSON object containing a single key "response" whose value is your full speech text (no other keys).`,
+    rebuttal: `Deliver your rebuttal. Directly address and refute your opponent's specific arguments. Point out logical flaws, missing evidence, or unconsidered consequences. Then reinforce your own position. Reply with a JSON object containing a single key "response" whose value is your full speech text (no other keys).`,
+    closing: `Deliver your closing statement. Summarize why your side has won the key clashes in this debate. Weigh the impacts and explain why your arguments are more compelling. Reply with a JSON object containing a single key "response" whose value is your full speech text (no other keys).`,
+  };
+  const userPrompt = phaseInstructions[phase] ?? phaseInstructions.opening;
 
   const model = Deno.env.get("OPENAI_MODEL") ?? "gpt-4o-mini";
-
   const res = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -131,6 +262,7 @@ async function callOpenAI(req: DebateRequest) {
       ],
       response_format: { type: "json_object" },
       temperature: 0.7,
+      max_tokens: 800,
     }),
   });
 
@@ -143,10 +275,19 @@ async function callOpenAI(req: DebateRequest) {
   const data = await res.json();
   const content = data?.choices?.[0]?.message?.content;
   if (!content || typeof content !== "string") return null;
-
   try {
-    return JSON.parse(content);
+    const parsed = JSON.parse(content);
+    const response =
+      typeof parsed?.response === "string"
+        ? parsed.response
+        : typeof parsed?.content === "string"
+          ? parsed.content
+          : null;
+    if (response && response.trim()) return { response };
+    return null;
   } catch {
+    // Model returned plain text instead of JSON
+    if (content.trim()) return { response: content.trim() };
     return null;
   }
 }

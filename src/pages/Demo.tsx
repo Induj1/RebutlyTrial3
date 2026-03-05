@@ -13,7 +13,6 @@ import {
   Download,
   Sparkles,
   Volume2,
-  VolumeX,
   RotateCcw,
   ArrowRight,
   Loader2,
@@ -25,9 +24,9 @@ import {
   BookOpen,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Slider } from '@/components/ui/slider';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/browserClient';
+import { invokeDebateAI } from '@/lib/debateAi';
 import { useVoiceInput } from '@/hooks/useVoiceInput';
 import { useAISpeech } from '@/hooks/useAISpeech';
 import { useAuth } from '@/hooks/useAuth';
@@ -86,6 +85,8 @@ interface DebateFeedback {
   keyMoments: KeyMoment[];
   researchSuggestions: string[];
 }
+
+const uniqueId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
 
 const DEMO_TOPICS = [
   "This House believes that social media does more harm than good",
@@ -247,7 +248,7 @@ const Demo = () => {
 
     setMessages((prev) => [
       ...prev,
-      { id: Date.now().toString(), sender: 'user', text: message, timestamp: new Date() },
+      { id: uniqueId(), sender: 'user', text: message, timestamp: new Date() },
     ]);
     setUserArguments(prev => [...prev, message]);
     userInputRef.current = '';
@@ -282,22 +283,20 @@ const Demo = () => {
     console.log('[Demo] Calling debate AI:', type, phaseType);
     
     try {
-      const { data, error } = await supabase.functions.invoke('debate-ai', {
-        body: {
-          type,
-          topic,
-          userSide,
-          phase: phaseType,
-          userArguments,
-          aiArguments,
-          speechDurationSeconds,
-          conversationHistory: messages
-            .filter(m => m.sender !== 'system')
-            .map(m => ({
-              role: m.sender === 'user' ? 'user' : 'assistant',
-              content: m.text
-            }))
-        }
+      const { data, error } = await invokeDebateAI({
+        type,
+        topic,
+        userSide,
+        phase: phaseType,
+        userArguments,
+        aiArguments,
+        speechDurationSeconds,
+        conversationHistory: messages
+          .filter(m => m.sender !== 'system')
+          .map(m => ({
+            role: m.sender === 'user' ? 'user' : 'assistant',
+            content: m.text
+          }))
       });
 
       if (error) {
@@ -548,7 +547,7 @@ const Demo = () => {
   const addMessage = (sender: 'user' | 'ai' | 'system', text: string) => {
     setMessages((prev) => [
       ...prev,
-      { id: Date.now().toString(), sender, text, timestamp: new Date() },
+      { id: uniqueId(), sender, text, timestamp: new Date() },
     ]);
   };
 
@@ -766,31 +765,6 @@ const Demo = () => {
           </div>
 
           <div className="flex items-center gap-2">
-            {(phase === 'setup' || phase === 'prep' || isDebatePhase) && (
-              <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-muted">
-                {aiSpeech.isMuted || aiSpeech.volume === 0 ? (
-                  <VolumeX className="w-4 h-4 text-muted-foreground" />
-                ) : (
-                  <Volume2 className="w-4 h-4 text-muted-foreground" />
-                )}
-                <Slider
-                  value={[Math.round(aiSpeech.volume * 100)]}
-                  onValueChange={([v]) => {
-                    const normalizedVolume = v / 100;
-                    aiSpeech.setVolume(normalizedVolume);
-                    aiSpeech.setIsMuted(v === 0);
-                  }}
-                  max={100}
-                  min={0}
-                  step={5}
-                  className="w-24"
-                />
-                <span className="text-xs text-muted-foreground w-9 text-right">
-                  {Math.round(aiSpeech.volume * 100)}%
-                </span>
-              </div>
-            )}
-            
             {/* User speaking timer */}
             {isCurrentlyUserSpeaking && (
               <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-muted">

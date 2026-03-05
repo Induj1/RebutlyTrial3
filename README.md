@@ -143,7 +143,16 @@ supabase secrets set ELEVENLABS_VOICE_ID_MALE=EXAVITQu4vr4xnSDxMaL
 supabase secrets set ELEVENLABS_VOICE_ID_FEMALE=21m00Tcm4TlvDq8ikWAM
 ```
 
-### 5) Deploy functions
+### 5) Allow CORS for your app origin (required for Edge Functions)
+
+In **Supabase Dashboard** → your project → **Settings** → **API**, find **Allowed Origins (CORS)** and add:
+
+- Your production URL, e.g. `https://rebutly-trial3-six.vercel.app`
+- For local dev: `http://localhost:8080` and `http://localhost:8081` (or whatever port you use)
+
+Without these, the browser will block calls to `debate-ai` and other Edge Functions with a CORS error.
+
+### 6) Deploy functions
 
 ```bash
 supabase functions deploy matchmaking-worker

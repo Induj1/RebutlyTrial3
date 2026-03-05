@@ -26,6 +26,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/browserClient';
+import { invokeDebateAI } from '@/lib/debateAi';
 import { useVoiceInput } from '@/hooks/useVoiceInput';
 import { useAISpeech } from '@/hooks/useAISpeech';
 import { useAuth } from '@/hooks/useAuth';
@@ -254,22 +255,20 @@ const PlayDebate = ({ topic, format: initialFormat, onExit }: PlayDebateProps) =
     console.log('[PlayDebate] Calling debate AI:', type, phaseType);
     
     try {
-      const { data, error } = await supabase.functions.invoke('debate-ai', {
-        body: {
-          type,
-          topic,
-          userSide,
-          phase: phaseType,
-          userArguments,
-          aiArguments,
-          speechDurationSeconds,
-          conversationHistory: messages
-            .filter(m => m.sender !== 'system')
-            .map(m => ({
-              role: m.sender === 'user' ? 'user' : 'assistant',
-              content: m.text
-            }))
-        }
+      const { data, error } = await invokeDebateAI({
+        type,
+        topic,
+        userSide,
+        phase: phaseType,
+        userArguments,
+        aiArguments,
+        speechDurationSeconds,
+        conversationHistory: messages
+          .filter(m => m.sender !== 'system')
+          .map(m => ({
+            role: m.sender === 'user' ? 'user' : 'assistant',
+            content: m.text
+          }))
       });
 
       if (error) {

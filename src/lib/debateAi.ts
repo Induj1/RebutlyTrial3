@@ -1,0 +1,36 @@
+/**
+ * Call debate-ai via same-origin proxy to avoid CORS.
+ * Use this instead of supabase.functions.invoke('debate-ai', ...) so production (Vercel) works
+ * without Supabase Allowed Origins.
+ */
+
+export type DebateAIBody = {
+  type: 'opponent_response' | 'generate_feedback';
+  topic: string;
+  userSide: 'proposition' | 'opposition';
+  phase: 'opening' | 'rebuttal' | 'closing';
+  userArguments?: string[];
+  aiArguments?: string[];
+  speechDurationSeconds?: number;
+  conversationHistory?: { role: string; content: string }[];
+};
+
+export async function invokeDebateAI(body: DebateAIBody): Promise<{ data: unknown; error: Error | null }> {
+  const base = typeof window !== 'undefined' ? window.location.origin : '';
+  const url = `${base}/api/debate-ai`;
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const msg = (data && (data.error || data.message)) || `Request failed ${res.status}`;
+      return { data: null, error: new Error(typeof msg === 'string' ? msg : JSON.stringify(msg)) };
+    }
+    return { data, error: null };
+  } catch (err) {
+    return { data: null, error: err instanceof Error ? err : new Error(String(err)) };
+  }
+}
