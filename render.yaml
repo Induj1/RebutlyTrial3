@@ -1,0 +1,14 @@
+# Backend: Debate AI API on Render
+# Deploy with CLI: npm run render:validate && npm run render:deploy
+# Or: render blueprints apply (after connecting repo once via dashboard)
+services:
+  - type: web
+    name: rebutly-debate-ai-api
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm run start:api
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Add OPENAI_API_KEY in Render dashboard (Secret) for real AI responses

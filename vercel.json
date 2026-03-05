@@ -3,12 +3,9 @@
     "api/twilio-token.js": {
       "memory": 256,
       "maxDuration": 10
-    },
-    "api/debate-ai.js": {
-      "memory": 256,
-      "maxDuration": 30
     }
   },
+  "framework": "vite",
   "headers": [
     {
       "source": "/(.*)",
