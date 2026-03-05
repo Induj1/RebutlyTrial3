@@ -58,7 +58,7 @@ uihui### Option B: Manual deploy (dashboard)
      This is used by the **serverless proxy** (`api/debate-ai.js`); the browser never calls Render directly, so there is no CORS.
    - Do **not** set `VITE_DEBATE_AI_API_URL` — the app uses same-origin `/api/debate-ai` in production.
    - Add any other `VITE_*` / Supabase vars your app needs.
-4. Deploy. The frontend calls `/api/debate-ai` on Vercel; the serverless function forwards to Render.
+4. Deploy. The frontend calls `/api/debate-ai` on Vercel; a **rewrite** in `vercel.json` proxies it to your Render API (no serverless function needed). If your Render URL is different, edit `vercel.json` → `rewrites` → `destination` to match.
 
 ---
 
