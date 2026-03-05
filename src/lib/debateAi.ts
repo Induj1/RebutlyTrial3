@@ -26,7 +26,11 @@ export async function invokeDebateAI(body: DebateAIBody): Promise<{ data: unknow
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      const msg = (data && (data.error || data.message)) || `Request failed ${res.status}`;
+      let msg = (data && (data.error || data.message)) || `Request failed ${res.status}`;
+      if (res.status === 404) {
+        msg =
+          'Debate AI endpoint not found. Deploy the Supabase Edge Function: supabase functions deploy debate-ai';
+      }
       return { data: null, error: new Error(typeof msg === 'string' ? msg : JSON.stringify(msg)) };
     }
     return { data, error: null };
