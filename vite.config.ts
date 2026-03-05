@@ -41,7 +41,10 @@ function debateAiProxyPlugin(supabaseUrl: string, supabaseKey: string) {
           fetch(target, { method: "POST", headers, body })
             .then(async (r) => {
               res.statusCode = r.status;
-              r.headers.forEach((v, k) => res.setHeader(k, v));
+              const skip = ["content-encoding", "transfer-encoding"];
+              r.headers.forEach((v, k) => {
+                if (!skip.includes(k.toLowerCase())) res.setHeader(k, v);
+              });
               res.end(await r.text());
             })
             .catch((err) => {
