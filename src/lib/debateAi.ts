@@ -46,7 +46,13 @@ export async function invokeDebateAI(body: DebateAIBody): Promise<{ data: unknow
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    const data = await res.json().catch(() => ({}));
+    const raw = await res.text();
+    let data: unknown = {};
+    try {
+      data = raw ? JSON.parse(raw) : {};
+    } catch {
+      if (!res.ok) data = { error: raw || `Request failed ${res.status}` };
+    }
     if (!res.ok) {
       const msg =
         (data && typeof data === 'object' && ('error' in data ? (data as any).error : (data as any).message)) ||

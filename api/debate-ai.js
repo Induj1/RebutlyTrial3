@@ -33,19 +33,33 @@ export default async function handler(req, res) {
   if (RENDER_API_URL) {
     const url = `${RENDER_API_URL.replace(/\/$/, '')}/api/debate-ai`;
     try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 60000);
       const out = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body,
+        signal: controller.signal,
       });
+      clearTimeout(timeout);
       const text = await out.text();
-      const data = text ? JSON.parse(text) : {};
-      res.status(out.status).json(data);
+      let data;
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch {
+        data = { error: text || 'Debate AI returned invalid response', status: out.status };
+      }
+      if (!out.ok) {
+        const status = out.status >= 400 ? out.status : 502;
+        const payload = data && (data.error || data.message) ? data : { error: text || 'Debate AI error' };
+        return res.status(status).json(payload);
+      }
+      return res.status(200).json(data);
     } catch (err) {
+      const msg = err.name === 'AbortError' ? 'Debate AI timed out (try again)' : (err.message || 'Failed to reach Debate AI');
       console.error('[debate-ai proxy] Render', err);
-      res.status(502).json({ error: err.message || 'Failed to reach Debate AI' });
+      return res.status(502).json({ error: msg });
     }
-    return;
   }
 
   // Fallback: Supabase Edge Function
