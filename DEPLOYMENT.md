@@ -42,9 +42,9 @@ uihui### Option B: Manual deploy (dashboard)
 5. **Environment (optional):**  
    Click **Advanced** → **Add Environment Variable** → add **OPENAI_API_KEY** as **Secret** if you want real AI (otherwise the API uses fallback text).
 6. Click **Create Web Service**. Wait for the first deploy to finish.
-7. Copy your service URL (e.g. `https://rebutly-debate-ai-api.onrender.com`).  
+7. Copy your service URL (e.g. `https://rebutlytrial3.onrender.com`).  
    The API is at: **`https://<your-service-name>.onrender.com/api/debate-ai`**.  
-   Use this URL (no `/api/debate-ai`) as **VITE_DEBATE_AI_API_URL** in Vercel.
+   In **Vercel** → Project → Settings → Environment Variables, set **VITE_DEBATE_AI_API_URL** = `https://rebutlytrial3.onrender.com` (no trailing slash), then redeploy.
 
 ---
 

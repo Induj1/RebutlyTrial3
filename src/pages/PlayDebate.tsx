@@ -295,7 +295,7 @@ const PlayDebate = ({ topic, format: initialFormat, onExit }: PlayDebateProps) =
         const aiResponse = data.response;
         setAiArguments(prev => [...prev, aiResponse]);
         
-        const messageId = Date.now().toString();
+        const messageId = `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
         setMessages(prev => [...prev, {
           id: messageId,
           sender: 'ai',
@@ -452,7 +452,7 @@ const PlayDebate = ({ topic, format: initialFormat, onExit }: PlayDebateProps) =
   const addMessage = (sender: 'user' | 'ai' | 'system', text: string) => {
     setMessages((prev) => [
       ...prev,
-      { id: Date.now().toString(), sender, text, timestamp: new Date() },
+      { id: `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`, sender, text, timestamp: new Date() },
     ]);
   };
 
