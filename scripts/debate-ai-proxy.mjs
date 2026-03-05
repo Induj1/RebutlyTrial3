@@ -16,7 +16,7 @@ function corsHeaders() {
   return {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "content-type, authorization",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept",
     "Access-Control-Max-Age": "86400",
   };
 }
@@ -25,26 +25,30 @@ const server = http.createServer((req, res) => {
   const pathname = req.url?.split("?")[0] || "";
   const cors = corsHeaders();
 
+  // Always set CORS so any response (including errors) allows the browser to read it
+  const setCors = (headers) => ({ ...cors, ...headers });
+
   if (pathname !== "/api/debate-ai") {
-    res.writeHead(404, { ...cors, "Content-Type": "application/json" });
+    res.writeHead(404, setCors({ "Content-Type": "application/json" }));
     res.end(JSON.stringify({ error: "Not found. Use POST /api/debate-ai" }));
     return;
   }
 
+  // Preflight: must return 200 or 204 with CORS so the browser allows the actual POST
   if (req.method === "OPTIONS") {
-    res.writeHead(204, cors);
+    res.writeHead(200, setCors({ "Content-Length": "0" }));
     res.end();
     return;
   }
 
   if (req.method === "GET") {
-    res.writeHead(200, { ...cors, "Content-Type": "application/json" });
+    res.writeHead(200, setCors({ "Content-Type": "application/json" }));
     res.end(JSON.stringify({ status: "ok", message: "Debate AI runs locally. POST here for the API." }));
     return;
   }
 
   if (req.method !== "POST") {
-    res.writeHead(405, { ...cors, "Content-Type": "application/json" });
+    res.writeHead(405, setCors({ "Content-Type": "application/json" }));
     res.end(JSON.stringify({ error: "Method not allowed" }));
     return;
   }
@@ -57,18 +61,18 @@ const server = http.createServer((req, res) => {
     try {
       body = raw ? JSON.parse(raw) : {};
     } catch {
-      res.writeHead(400, { ...cors, "Content-Type": "application/json" });
+      res.writeHead(400, setCors({ "Content-Type": "application/json" }));
       res.end(JSON.stringify({ error: "Invalid JSON body" }));
       return;
     }
     console.log("[debate-ai] local", body.type || "opponent_response");
     const { data, error } = await handleDebateAILocal(body);
     if (error) {
-      res.writeHead(500, { ...cors, "Content-Type": "application/json" });
+      res.writeHead(500, setCors({ "Content-Type": "application/json" }));
       res.end(JSON.stringify({ error: error.message }));
       return;
     }
-    res.writeHead(200, { ...cors, "Content-Type": "application/json" });
+    res.writeHead(200, setCors({ "Content-Type": "application/json" }));
     res.end(JSON.stringify(data));
   });
 });
