@@ -3,15 +3,11 @@ import react from "@vitejs/plugin-react";
 import path from "path";
 import { componentTagger } from "lovable-tagger";
 
-/** Dev-only middleware so POST /api/debate-ai is proxied before SPA fallback (which can 404 POST). */
+/** Dev-only: handle POST /api/debate-ai first so SPA fallback doesn't 404 it. */
 function debateAiProxyPlugin(supabaseUrl: string, supabaseKey: string) {
   const base = supabaseUrl.replace(/\/$/, "");
   const target = `${base}/functions/v1/debate-ai`;
-  return {
-    name: "debate-ai-proxy",
-    enforce: "pre" as const,
-    configureServer(server: { middlewares: { use: (fn: (req: any, res: any, next: () => void) => void) => void } }) {
-      server.middlewares.use((req: any, res: any, next: () => void) => {
+  const handler = (req: any, res: any, next: () => void) => {
         if (req.url !== "/api/debate-ai" && !req.url?.startsWith("/api/debate-ai?")) {
           next();
           return;
@@ -54,7 +50,23 @@ function debateAiProxyPlugin(supabaseUrl: string, supabaseKey: string) {
               res.end(JSON.stringify({ error: err.message || "Failed to reach debate-ai" }));
             });
         });
-      });
+  };
+  return {
+    name: "debate-ai-proxy",
+    enforce: "pre" as const,
+    configureServer(server: {
+      middlewares: {
+        use: (fn: (req: any, res: any, next: () => void) => void) => void;
+        stack?: Array< { route: string; handle: (req: any, res: any, next: () => void) => void }>;
+      };
+    }) {
+      // Prepend so we run before proxy/SPA fallback (POST would otherwise 404)
+      const stack = (server.middlewares as any).stack;
+      if (Array.isArray(stack)) {
+        stack.unshift({ route: "", handle: handler });
+      } else {
+        server.middlewares.use(handler);
+      }
     },
   };
 }

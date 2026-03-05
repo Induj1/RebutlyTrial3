@@ -1,6 +1,6 @@
 /**
- * Call debate-ai Edge Function. Prefers direct Supabase URL (works in dev without proxy);
- * falls back to same-origin /api/debate-ai for production (e.g. Vercel serverless).
+ * Call debate-ai via same-origin /api/debate-ai (Vite proxy in dev, Vercel serverless in prod).
+ * Avoids CORS by never calling Supabase from the browser.
  */
 
 export type DebateAIBody = {
@@ -14,32 +14,13 @@ export type DebateAIBody = {
   conversationHistory?: { role: string; content: string }[];
 };
 
-function getDebateAIEndpoint(): { url: string; headers: Record<string, string> } {
-  const supabaseUrl = (import.meta as any).env?.VITE_SUPABASE_URL as string | undefined;
-  const anonKey = (import.meta as any).env?.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined;
-  const base = supabaseUrl?.replace?.(/\/$/, '') ?? '';
-  if (base && anonKey) {
-    return {
-      url: `${base}/functions/v1/debate-ai`,
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${anonKey}`,
-      },
-    };
-  }
-  const origin = typeof window !== 'undefined' ? window.location.origin : '';
-  return {
-    url: `${origin}/api/debate-ai`,
-    headers: { 'Content-Type': 'application/json' },
-  };
-}
-
 export async function invokeDebateAI(body: DebateAIBody): Promise<{ data: unknown; error: Error | null }> {
-  const { url, headers } = getDebateAIEndpoint();
+  const base = typeof window !== 'undefined' ? window.location.origin : '';
+  const url = `${base}/api/debate-ai`;
   try {
     const res = await fetch(url, {
       method: 'POST',
-      headers,
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
     const data = await res.json().catch(() => ({}));
