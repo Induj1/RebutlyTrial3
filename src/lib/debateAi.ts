@@ -21,11 +21,10 @@ function getApiUrl(): string {
     const origin = typeof window !== 'undefined' ? window.location.origin : '';
     return `${origin}/api/debate-ai`;
   }
-  // Production (Vercel): set VITE_DEBATE_AI_API_URL to your Render API URL
-  const apiBase = env?.VITE_DEBATE_AI_API_URL as string | undefined;
-  if (apiBase) {
-    const base = apiBase.replace(/\/$/, '');
-    return `${base}/api/debate-ai`;
+  // Production: use same-origin so Vercel's api/debate-ai.js proxies to Render (no CORS). Set DEBATE_AI_API_URL in Vercel env.
+  const isProd = typeof import.meta.env?.DEV === 'undefined' || !import.meta.env.DEV;
+  if (isProd && typeof window !== 'undefined') {
+    return `${window.location.origin}/api/debate-ai`;
   }
   const proxyBase = env?.VITE_DEBATE_AI_PROXY_URL as string | undefined;
   if (proxyBase) {
