@@ -85,6 +85,6 @@ export default async function handler(req, res) {
 
   res.status(500).json({
     error: 'Debate AI not configured',
-    hint: 'Set DEBATE_AI_API_URL (e.g. https://rebutly-debate-ai-api.onrender.com) in Vercel Environment Variables.',
+    hint: 'Set DEBATE_AI_API_URL (e.g. https://rebutlytrial3.onrender.com) in Vercel Environment Variables.',
   });
 }

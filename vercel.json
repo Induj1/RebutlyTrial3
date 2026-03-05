@@ -24,7 +24,7 @@
   "rewrites": [
     {
       "source": "/api/debate-ai",
-      "destination": "https://rebutly-debate-ai-api.onrender.com/api/debate-ai"
+      "destination": "https://rebutlytrial3.onrender.com/api/debate-ai"
     },
     {
       "source": "/((?!api/).*)",

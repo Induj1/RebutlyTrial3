@@ -54,7 +54,7 @@ uihui### Option B: Manual deploy (dashboard)
 2. **Framework preset:** Vite (usually auto-detected).
 3. **Environment variables** (in Vercel project settings):
    - **DEBATE_AI_API_URL** = your Render API URL (no trailing slash), e.g.  
-     `https://rebutly-debate-ai-api.onrender.com`  
+     `https://rebutlytrial3.onrender.com`  
      This is used by the **serverless proxy** (`api/debate-ai.js`); the browser never calls Render directly, so there is no CORS.
    - Do **not** set `VITE_DEBATE_AI_API_URL` — the app uses same-origin `/api/debate-ai` in production.
    - Add any other `VITE_*` / Supabase vars your app needs.
